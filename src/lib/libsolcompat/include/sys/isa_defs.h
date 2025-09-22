@@ -357,6 +357,11 @@ extern "C" {
 #define	__sparc
 #endif
 
+/* Linux doesn't set __sparcv9 like Solaris */
+#if defined(__sparc_v9__) || defined(__arch64__)
+#define	__sparcv9
+#endif
+
 /*
  * You can be 32-bit or 64-bit, but not both at the same time.
  */
@@ -475,8 +480,14 @@ extern "C" {
 /*
  * Next defines common features between 32 and 64 bit PowerPC
  */
+#ifdef __BIG_ENDIAN__
 #ifndef _BIG_ENDIAN
 #define _BIG_ENDIAN
+#endif
+#elif defined(__LITTLE_ENDIAN__)
+#ifndef _LITTLE_ENDIAN
+#define _LITTLE_ENDIAN
+#endif
 #endif
 #define _STACK_GROWS_DOWNWARD
 #define _LONG_LONG_HTOL
@@ -513,7 +524,9 @@ extern "C" {
 /*
  * Define the appropriate "implementation choices" for PowerPC 64 bit
  */
+#if !defined(_LP64)
 #define _LP64
+#endif
 #if !defined(_I32LPx)
 #define _I32LPx
 #endif
@@ -536,6 +549,20 @@ extern "C" {
 #endif
 
 #endif
+
+#elif defined(__ARMEL__)
+// From https://bitbucket.org/cli/zfs-fuse-arm/src/865c93c81a95/src/lib/libsolcompat/include/sys/isa_defs.h
+/*
+ * Define processor specifications for ARM platform (little endian)
+ */
+#define _LITTLE_ENDIAN
+#define _LONG_LONG_LTOH
+#define _BIT_FIELDS_LTOH
+
+/*
+ * Define the appropriate "implementation choices" for ARM (little endian)
+ */
+#define _SUNOS_VTOC_16
 
 /*
  * #error is strictly ansi-C, but works as well as anything for K&R systems.

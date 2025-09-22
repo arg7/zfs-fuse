@@ -1,0 +1,14 @@
+--- a/src/lib/libsolcompat/include/sys/isa_defs.h
++++ b/src/lib/libsolcompat/include/sys/isa_defs.h
+@@ -357,6 +357,11 @@ extern "C" {
+ #define	__sparc
+ #endif
+ 
++/* Linux doesn't set __sparcv9 like Solaris */
++#if defined(__sparc_v9__) || defined(__arch64__)
++#define	__sparcv9
++#endif
++
+ /*
+  * You can be 32-bit or 64-bit, but not both at the same time.
+  */

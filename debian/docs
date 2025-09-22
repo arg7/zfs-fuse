@@ -4,4 +4,6 @@ README.NFS
 STATUS
 TESTING
 TODO
+contrib/hanoi.cron.daily
+contrib/zfs-fuse.automated.scrub.cron.d
 contrib/zfs_pool_alert

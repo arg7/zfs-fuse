@@ -1,0 +1,82 @@
+Description: Fix build failure with glibc 2.32
+ glibc 2.32 removes the Sun RPC headers, which are currently included by
+ zfs-fuse.  This patch switches to the tirpc library and fixes the build. 
+Author: Michael Hudson-Doyle <michael.hudson@ubuntu.com>
+Bug-Debian: https://bugs.debian.org/971688
+Last-Update: 2021-03-05
+
+--- zfs-fuse-0.7.0.orig/src/cmd/zdb/SConscript
++++ zfs-fuse-0.7.0/src/cmd/zdb/SConscript
+@@ -3,6 +3,6 @@ Import('env')
+ objects = Split('zdb.c zdb_il.c ptrace.c #lib/libavl/libavl.a #lib/libnvpair/libnvpair-user.a #lib/libumem/libumem.a #lib/libzfs/libzfs.a #lib/libzpool/libzpool-user.a #lib/libzfscommon/libzfscommon-user.a #lib/libuutil/libuutil.a #lib/libsolcompat/libsolcompat.a')
+ cpppath = Split('#lib/libavl/include #lib/libnvpair/include #lib/libumem/include #lib/libzfscommon/include #lib/libzpool/include #lib/libsolcompat/include #lib/libzfs/include')
+ 
+-libs = Split('rt pthread dl z m aio crypto')
++libs = Split('rt pthread dl z m aio crypto tirpc')
+ 
+ env.Program('zdb', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs)
+--- zfs-fuse-0.7.0.orig/src/cmd/zfs/SConscript
++++ zfs-fuse-0.7.0/src/cmd/zfs/SConscript
+@@ -3,6 +3,6 @@ Import('env')
+ objects = Split('zfs_main.c zfs_iter.c ptrace.c #lib/libzfs/libzfs.a #lib/libzfscommon/libzfscommon-user.a #lib/libnvpair/libnvpair-user.a #lib/libumem/libumem.a  #lib/libuutil/libuutil.a #lib/libavl/libavl.a #lib/libsolcompat/libsolcompat.a')
+ cpppath = Split('#lib/libuutil/include #lib/libnvpair/include #lib/libumem/include #lib/libzfscommon/include #lib/libzfs/include #lib/libsolcompat/include #lib/libavl/include')
+ 
+-libs = Split('pthread m dl crypto')
++libs = Split('pthread m dl crypto tirpc')
+ 
+ env.Program('zfs', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs)
+--- zfs-fuse-0.7.0.orig/src/cmd/zpool/SConscript
++++ zfs-fuse-0.7.0/src/cmd/zpool/SConscript
+@@ -3,6 +3,6 @@ Import('env')
+ objects = Split('zpool_iter.c zpool_main.c zpool_util.c zpool_vdev.c ptrace.c #lib/libnvpair/libnvpair-user.a #lib/libzfs/libzfs.a #lib/libumem/libumem.a #lib/libzfscommon/libzfscommon-user.a #lib/libuutil/libuutil.a #lib/libavl/libavl.a #lib/libsolcompat/libsolcompat.a ../stat/common/timestamp.c')
+ cpppath = Split('#lib/libuutil/include #lib/libnvpair/include #lib/libumem/include #lib/libzfscommon/include #lib/libzfs/include #lib/libsolcompat/include #lib/libavl/include ../stat/common ')
+ 
+-libs = Split('pthread m dl crypto')
++libs = Split('pthread m dl crypto tirpc')
+ 
+ env.Program('zpool', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs)
+--- zfs-fuse-0.7.0.orig/src/cmd/zstreamdump/SConscript
++++ zfs-fuse-0.7.0/src/cmd/zstreamdump/SConscript
+@@ -3,6 +3,6 @@ Import('env')
+ objects = Split('zstreamdump.c #lib/libzfs/libzfs.a #lib/libnvpair/libnvpair-user.a')
+ cpppath = Split('#lib/libnvpair/include #lib/libumem/include #lib/libzfscommon/include #lib/libzfs/include #lib/libsolcompat/include #lib/libzpool/include #lib/libavl/include')
+ 
+-libs = Split('pthread m dl')
++libs = Split('pthread m dl tirpc')
+ 
+ env.Program('zstreamdump', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs)
+--- zfs-fuse-0.7.0.orig/src/cmd/ztest/SConscript
++++ zfs-fuse-0.7.0/src/cmd/ztest/SConscript
+@@ -3,7 +3,7 @@ Import('env')
+ objects = Split('ztest.c #lib/libzpool/libzpool-user.a #lib/libzfscommon/libzfscommon-user.a #lib/libnvpair/libnvpair-user.a #lib/libavl/libavl.a #lib/libumem/libumem.a #lib/libsolcompat/libsolcompat.a')
+ cpppath = Split('#lib/libavl/include #lib/libnvpair/include #lib/libumem/include #lib/libzfscommon/include #lib/libzpool/include #lib/libsolcompat/include')
+ 
+-libs = Split('m dl rt pthread z aio crypto')
++libs = Split('m dl rt pthread z aio crypto tirpc')
+ 
+ env.Program('ztest', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs)
+ env.Depends('ztest', '../zdb/zdb')
+--- zfs-fuse-0.7.0.orig/src/lib/libnvpair/SConscript
++++ zfs-fuse-0.7.0/src/lib/libnvpair/SConscript
+@@ -8,8 +8,8 @@ objects = Split('libnvpair.c nvpair.c nv
+ objects_user = ['build-user/' + o for o in objects]
+ objects_kernel = ['build-kernel/' + o for o in objects]
+ 
+-cpppath_user = Split('./include #lib/libsolcompat/include')
+-cpppath_kernel = Split('./include #lib/libumem/include #lib/libnvpair/include1 #lib/libsolcompat/include')
++cpppath_user = Split('./include #lib/libsolcompat/include /usr/include/tirpc')
++cpppath_kernel = Split('./include #lib/libumem/include #lib/libnvpair/include1 #lib/libsolcompat/include  /usr/include/tirpc')
+ 
+ ccflags_kernel = ['-D_KERNEL']
+ 
+--- zfs-fuse-0.7.0.orig/src/zfs-fuse/SConscript
++++ zfs-fuse-0.7.0/src/zfs-fuse/SConscript
+@@ -4,7 +4,7 @@ objects = Split('main.c cmd_listener.c p
+ cpppath = Split('#lib/libavl/include #lib/libnvpair/include #lib/libumem/include #lib/libzfscommon/include #lib/libsolkerncompat/include')
+ ccflags = Split('-D_KERNEL')
+ 
+-libs = Split('rt pthread fuse dl z aio crypto')
++libs = Split('rt pthread fuse dl z aio crypto tirpc')
+ # use static AIO library.  Yes, you have to have double up the ".a"
+ libs[libs.index('aio')] = ':libaio.a.a'
+ 

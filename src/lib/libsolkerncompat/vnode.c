@@ -57,6 +57,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/taskq.h>
+#include <stddef.h>
 
 #include <sys/ioctl.h>
 /* LINUX BLKGETSIZE64 */

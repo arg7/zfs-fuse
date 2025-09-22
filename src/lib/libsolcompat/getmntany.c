@@ -32,6 +32,7 @@
 #include <string.h>
 #include <mntent.h>
 #include <sys/mnttab.h>
+#include <sys/sysmacros.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>

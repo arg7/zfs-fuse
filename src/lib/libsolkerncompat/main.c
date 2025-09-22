@@ -44,6 +44,7 @@ unsigned long _pagesize;
 unsigned int _pageshift;
 kmem_cache_t *vnode_cache;
 extern void system_taskq_init();
+struct utsname utsname;
 
 void libsolkerncompat_init()
 {

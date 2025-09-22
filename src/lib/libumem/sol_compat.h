@@ -176,8 +176,83 @@ static INLINE uint_t ec_atomic_cas(uint_t *mem, uint_t with, uint_t cmp)
         : "memory");
   return prev;
 }
+# elif defined(__sparc__) && defined(__GNUC__)
+static INLINE uint_t ec_atomic_cas(uint_t *mem, uint_t with, uint_t cmp)
+{
+  __asm volatile ("cas [%3],%2,%0"
+        : "+r"(with), "=m"(*(mem))
+        : "r"(cmp), "r"(mem), "m"(*(mem)) );
+  return with;
+}
 # endif
+#if defined(__arm__)
 
+//#include <asm-arm/irqflags.h>
+
+//typedef struct { volatile int counter; } atomic_t;
+/*
+ * Save the current interrupt enable state & disable IRQs
+ */
+#define raw_local_irq_save(x)					\
+	({							\
+		unsigned long temp;				\
+		(void) (&temp == &x);				\
+	__asm__ __volatile__(					\
+	"mrs	%0, cpsr		@ local_irq_save\n"	\
+"	orr	%1, %0, #128\n"					\
+"	msr	cpsr_c, %1"					\
+	: "=r" (x), "=r" (temp)					\
+	:							\
+	: "memory", "cc");					\
+	})
+
+/*
+ * restore saved IRQ & FIQ state
+ */
+#define raw_local_irq_restore(x)				\
+	__asm__ __volatile__(					\
+	"msr	cpsr_c, %0		@ local_irq_restore\n"	\
+	:							\
+	: "r" (x)						\
+	: "memory", "cc")
+
+typedef uint_t atomic_t;
+static inline uint_t atomic_add_return(int i, atomic_t *v)
+{
+	unsigned long flags;
+	uint_t val;
+
+	raw_local_irq_save(flags);
+//	val = v->counter;
+//	v->counter = val += i;
+	val = *v;
+	*v = val += i;
+	raw_local_irq_restore(flags);
+
+	return val;
+}
+
+#define atomic_inc(v)	 atomic_add_return(1, v)
+#define ec_atomic_inc(v) atomic_inc(v)
+
+#endif
+
+#endif
+
+#define P2PHASE(x, align)    ((x) & ((align) - 1))
+#define P2ALIGN(x, align)    ((x) & -(align))
+#define P2NPHASE(x, align)    (-(x) & ((align) - 1))
+#define P2ROUNDUP(x, align)   (-(-(x) & -(align)))
+#define P2END(x, align)     (-(~(x) & -(align)))
+#define P2PHASEUP(x, align, phase)  ((phase) - (((phase) - (x)) & -(align)))
+#define P2CROSS(x, y, align)    (((x) ^ (y)) > (align) - 1)
+#define P2SAMEHIGHBIT(x, y)    (((x) ^ (y)) < ((x) & (y)))
+#define IS_P2ALIGNED(v, a) ((((uintptr_t)(v)) & ((uintptr_t)(a) - 1)) == 0)
+#define ISP2(x)    (((x) & ((x) - 1)) == 0)
+
+/* beware! umem only uses these atomic adds for incrementing by 1 */
+#if defined(_WIN32) || (defined(__GNUC__) && \
+   (defined(__i386__) || defined(__x86_64__) || defined(__sparc__)))
 # ifndef ec_atomic_inc
 static INLINE uint_t ec_atomic_inc(uint_t *mem)
 {
@@ -194,22 +269,20 @@ static INLINE uint_t ec_atomic_inc(uint_t *mem)
 #  define ec_atomic_inc64(a)  (*a)++
 # endif
 
-#endif
-
-#define P2PHASE(x, align)    ((x) & ((align) - 1))
-#define P2ALIGN(x, align)    ((x) & -(align))
-#define P2NPHASE(x, align)    (-(x) & ((align) - 1))
-#define P2ROUNDUP(x, align)   (-(-(x) & -(align)))
-#define P2END(x, align)     (-(~(x) & -(align)))
-#define P2PHASEUP(x, align, phase)  ((phase) - (((phase) - (x)) & -(align)))
-#define P2CROSS(x, y, align)    (((x) ^ (y)) > (align) - 1)
-#define P2SAMEHIGHBIT(x, y)    (((x) ^ (y)) < ((x) & (y)))
-#define IS_P2ALIGNED(v, a) ((((uintptr_t)(v)) & ((uintptr_t)(a) - 1)) == 0)
-#define ISP2(x)    (((x) & ((x) - 1)) == 0)
-
-/* beware! umem only uses these atomic adds for incrementing by 1 */
 #define atomic_add_64(lvalptr, delta) ec_atomic_inc64(lvalptr)
 #define atomic_add_32_nv(a, b)  	  ec_atomic_inc(a) 
+#elif defined(__powerpc) || defined(__powerpc__) ||\
+      defined(__arm__) || \
+      defined(__powerpc64) || defined(__powerpc64__)
+# ifndef ec_atomic_inc64
+#  define ec_atomic_inc64(a)  (*a)++
+# endif
+#define atomic_add_64(lvalptr, delta) ec_atomic_inc64(lvalptr)
+#define atomic_add_32_nv(a, b)  	  ec_atomic_inc(a)
+#else
+extern uint32_t atomic_add_32_nv(volatile uint32_t *, int32_t);
+extern void atomic_add_64(volatile uint64_t *, int64_t);
+#endif
 
 #ifndef NANOSEC
 #define NANOSEC 1000000000

@@ -35,7 +35,7 @@ extern "C" {
 #endif
 
 void * safe_malloc(size_t size);
-libzfs_handle_t *g_zfs;
+extern libzfs_handle_t *g_zfs;
 
 #ifdef	__cplusplus
 }

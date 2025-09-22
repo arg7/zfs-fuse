@@ -42,7 +42,7 @@
 
 #include "misc.h"
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 # include <malloc.h>
 #endif
 
@@ -63,7 +63,7 @@ typedef struct malloc_data {
 	uint32_t malloc_stat; /* = UMEM_MALLOC_ENCODE(state, malloc_size) */
 } malloc_data_t;
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 static void *umem_malloc_hook(size_t size_arg, const void *caller)
 #else
 void *
@@ -129,7 +129,7 @@ malloc(size_t size_arg)
 	return ((void *)ret);
 }
 
-#ifndef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 void *
 calloc(size_t nelem, size_t elsize)
 {
@@ -157,7 +157,7 @@ calloc(size_t nelem, size_t elsize)
  * code.
  */
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 static void *umem_memalign_hook(size_t size_arg, size_t align, const void *caller)
 #else
 void *
@@ -241,7 +241,7 @@ memalign(size_t align, size_t size_arg)
 	return ((void *)ret);
 }
 
-#ifndef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 void *
 valloc(size_t size)
 {
@@ -393,7 +393,7 @@ process_memalign:
 	return (1);
 }
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 static void umem_free_hook(void *buf, const void *caller)
 #else
 void
@@ -409,7 +409,7 @@ free(void *buf)
 	(void) process_free(buf, 1, NULL);
 }
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 static void *umem_realloc_hook(void *buf_arg, size_t newsize, const void *caller)
 #else
 void *
@@ -442,7 +442,7 @@ realloc(void *buf_arg, size_t newsize)
 	return (buf);
 }
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !__GLIBC_PREREQ(2,34)
 static void __attribute__((constructor)) umem_malloc_init_hook(void)
 {
 	if (__malloc_hook != umem_malloc_hook) {
@@ -454,7 +454,11 @@ static void __attribute__((constructor)) umem_malloc_init_hook(void)
 	}
 }
 
-void (*__malloc_initialize_hook)(void) = umem_malloc_init_hook;
+#if __GLIBC_PREREQ(2, 14) && !__GLIBC_PREREQ(2,34)
+void (* __volatile __malloc_initialize_hook)(void) = umem_malloc_init_hook;
+#else
+void (* __malloc_initialize_hook)(void) = umem_malloc_init_hook;
+#endif
 
 #else
 void __attribute__((constructor))

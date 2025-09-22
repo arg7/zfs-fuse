@@ -44,7 +44,7 @@ uint_t num_logs(nvlist_t *nv);
  * Virtual device functions
  */
 
-nvlist_t *make_root_vdev(zpool_handle_t *zhp, int force, int check_rep,
+nvlist_t *make_root_vdev(zpool_handle_t *zhp, nvlist_t *props, int force, int check_rep,
     boolean_t isreplace, boolean_t dryrun, int argc, char **argv);
 nvlist_t *split_mirror_vdev(zpool_handle_t *zhp, char *newname,
     nvlist_t *props, splitflags_t flags, int argc, char **argv);
@@ -64,7 +64,7 @@ void pool_list_free(zpool_list_t *);
 int pool_list_count(zpool_list_t *);
 void pool_list_remove(zpool_list_t *, zpool_handle_t *);
 
-libzfs_handle_t *g_zfs;
+extern libzfs_handle_t *g_zfs;
 
 #ifdef	__cplusplus
 }

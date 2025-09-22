@@ -1,0 +1,48 @@
+Index: zfs-fuse/src/lib/libsolcompat/getmntany.c
+===================================================================
+--- zfs-fuse.orig/src/lib/libsolcompat/getmntany.c
++++ zfs-fuse/src/lib/libsolcompat/getmntany.c
+@@ -32,6 +32,7 @@
+ #include <string.h>
+ #include <mntent.h>
+ #include <sys/mnttab.h>
++#include <sys/sysmacros.h>
+ 
+ #include <sys/types.h>
+ #include <sys/stat.h>
+Index: zfs-fuse/src/cmd/zfs/zfs_main.c
+===================================================================
+--- zfs-fuse.orig/src/cmd/zfs/zfs_main.c
++++ zfs-fuse/src/cmd/zfs/zfs_main.c
+@@ -46,6 +46,7 @@
+ #include <sys/mount.h>
+ #include <sys/stat.h>
+ #include <sys/fs/zfs.h>
++#include <sys/sysmacros.h>
+ 
+ #include <libzfs.h>
+ #include <libuutil.h>
+Index: zfs-fuse/src/lib/libsolkerncompat/vfs.c
+===================================================================
+--- zfs-fuse.orig/src/lib/libsolkerncompat/vfs.c
++++ zfs-fuse/src/lib/libsolkerncompat/vfs.c
+@@ -38,6 +38,7 @@
+ #include <errno.h>
+ #include <pthread.h>
+ #include <unistd.h>
++#include <stddef.h>
+ 
+ struct vfs st_rootvfs = {};
+ 
+Index: zfs-fuse/src/lib/libsolkerncompat/vnode.c
+===================================================================
+--- zfs-fuse.orig/src/lib/libsolkerncompat/vnode.c
++++ zfs-fuse/src/lib/libsolkerncompat/vnode.c
+@@ -57,6 +57,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <sys/taskq.h>
++#include <stddef.h>
+ 
+ #include <sys/ioctl.h>
+ /* LINUX BLKGETSIZE64 */

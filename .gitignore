@@ -4,6 +4,8 @@
 *.swp
 *.orig
 *.sconsign.dblite
+.vscode
+
 
 src/zfs-fuse/zfs-fuse
 src/cmd/zdb/zdb

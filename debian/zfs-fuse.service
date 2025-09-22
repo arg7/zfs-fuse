@@ -1,0 +1,22 @@
+[Unit]
+Documentation=man:zfs-fuse(8)
+Description=Daemon for ZFS support via FUSE
+DefaultDependencies=no
+Before=sysinit.target
+Before=shutdown.target
+After=local-fs.target
+Conflicts=shutdown.target
+
+[Service]
+Type=forking
+Restart=no
+TimeoutSec=0
+IgnoreSIGPIPE=no
+KillMode=process
+GuessMainPID=no
+RemainAfterExit=yes
+ExecStart=/etc/init.d/zfs-fuse start
+ExecStop=/etc/init.d/zfs-fuse stop
+
+[Install]
+WantedBy=sysinit.target

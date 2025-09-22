@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if dpkg-maintscript-helper supports rm_conffile 2>/dev/null; then
+    dpkg-maintscript-helper rm_conffile /etc/bash_completion.d/zfs-fuse 0.7.0-13.1 -- "$@"
+fi
+
+
+#DEBHELPER#
+
+exit 0

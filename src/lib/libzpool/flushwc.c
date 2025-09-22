@@ -130,12 +130,16 @@ static int flushATAwc(int fd) {
  */
 int flushwc(vnode_t *vn) {
   int major_number;
+  int minor_number;
 
   if(!S_ISBLK(vn->v_stat.st_mode))
     // We can only flush the write cache of a block device.
     return ENOTSUP;
 
   major_number = major(vn->v_stat.st_rdev);
+  minor_number = minor(vn->v_stat.st_rdev);
+  if (minor_number % 16 != 0)
+	  return ENOTSUP;
 
   switch(major_number) {
   case SCSI_DISK0_MAJOR:

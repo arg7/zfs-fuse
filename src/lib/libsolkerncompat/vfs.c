@@ -38,6 +38,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stddef.h>
 
 struct vfs st_rootvfs = {};
 

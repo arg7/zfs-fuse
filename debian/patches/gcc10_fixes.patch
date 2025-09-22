@@ -1,0 +1,129 @@
+Index: zfs-fuse/src/lib/libsolcompat/include/sys/utsname.h
+===================================================================
+--- zfs-fuse.orig/src/lib/libsolcompat/include/sys/utsname.h
++++ zfs-fuse/src/lib/libsolcompat/include/sys/utsname.h
+@@ -29,7 +29,7 @@
+ 
+ #include_next <sys/utsname.h>
+ 
+-struct utsname utsname;
++extern struct utsname utsname;
+ 
+ #endif
+ 
+Index: zfs-fuse/src/cmd/zfs/zfs_util.h
+===================================================================
+--- zfs-fuse.orig/src/cmd/zfs/zfs_util.h
++++ zfs-fuse/src/cmd/zfs/zfs_util.h
+@@ -35,7 +35,7 @@ extern "C" {
+ #endif
+ 
+ void * safe_malloc(size_t size);
+-libzfs_handle_t *g_zfs;
++extern libzfs_handle_t *g_zfs;
+ 
+ #ifdef	__cplusplus
+ }
+Index: zfs-fuse/src/cmd/zpool/zpool_util.h
+===================================================================
+--- zfs-fuse.orig/src/cmd/zpool/zpool_util.h
++++ zfs-fuse/src/cmd/zpool/zpool_util.h
+@@ -64,7 +64,7 @@ void pool_list_free(zpool_list_t *);
+ int pool_list_count(zpool_list_t *);
+ void pool_list_remove(zpool_list_t *, zpool_handle_t *);
+ 
+-libzfs_handle_t *g_zfs;
++extern libzfs_handle_t *g_zfs;
+ 
+ #ifdef	__cplusplus
+ }
+Index: zfs-fuse/src/cmd/zpool/zpool_main.c
+===================================================================
+--- zfs-fuse.orig/src/cmd/zpool/zpool_main.c
++++ zfs-fuse/src/cmd/zpool/zpool_main.c
+@@ -181,6 +181,8 @@ static char history_str[HIS_MAX_RECORD_L
+ 
+ static uint_t timestamp_fmt = NODATE;
+ 
++libzfs_handle_t *g_zfs;
++
+ static const char *
+ get_usage(zpool_help_t idx) {
+ 	switch (idx) {
+Index: zfs-fuse/src/lib/libzfs/libzfs_zfsfuse.c
+===================================================================
+--- zfs-fuse.orig/src/lib/libzfs/libzfs_zfsfuse.c
++++ zfs-fuse/src/lib/libzfs/libzfs_zfsfuse.c
+@@ -37,8 +37,6 @@
+ 
+ #include "libzfs_impl.h"
+ 
+-int aok=0;
+-
+ int zfsfuse_open(const char *pathname, int flags)
+ {
+ 	struct sockaddr_un name;
+Index: zfs-fuse/src/zfs-fuse/zfs_vnops.c
+===================================================================
+--- zfs-fuse.orig/src/zfs-fuse/zfs_vnops.c
++++ zfs-fuse/src/zfs-fuse/zfs_vnops.c
+@@ -4669,7 +4669,6 @@ zfs_isdir()
+ /*
+  * Directory vnode operations template
+  */
+-vnodeops_t *zfs_dvnodeops;
+ const fs_operation_def_t zfs_dvnodeops_template[] = {
+ 	VOPNAME_OPEN,		{ .vop_open = zfs_open },
+ 	VOPNAME_CLOSE,		{ .vop_close = zfs_close },
+@@ -4702,7 +4701,6 @@ const fs_operation_def_t zfs_dvnodeops_t
+ /*
+  * Regular file vnode operations template
+  */
+-vnodeops_t *zfs_fvnodeops;
+ const fs_operation_def_t zfs_fvnodeops_template[] = {
+ 	VOPNAME_OPEN,		{ .vop_open = zfs_open },
+ 	VOPNAME_CLOSE,		{ .vop_close = zfs_close },
+@@ -4735,7 +4733,6 @@ const fs_operation_def_t zfs_fvnodeops_t
+ /*
+  * Symbolic link vnode operations template
+  */
+-vnodeops_t *zfs_symvnodeops;
+ const fs_operation_def_t zfs_symvnodeops_template[] = {
+ 	VOPNAME_GETATTR,	{ .vop_getattr = zfs_getattr },
+ 	VOPNAME_SETATTR,	{ .vop_setattr = zfs_setattr },
+@@ -4753,7 +4750,6 @@ const fs_operation_def_t zfs_symvnodeops
+ /*
+  * special share hidden files vnode operations template
+  */
+-vnodeops_t *zfs_sharevnodeops;
+ const fs_operation_def_t zfs_sharevnodeops_template[] = {
+ 	VOPNAME_GETATTR,	{ .vop_getattr = zfs_getattr },
+ 	VOPNAME_ACCESS,		{ .vop_access = zfs_access },
+@@ -4777,7 +4773,6 @@ const fs_operation_def_t zfs_sharevnodeo
+  *	zfs_link()	- no links into/out of attribute space
+  *	zfs_rename()	- no moves into/out of attribute space
+  */
+-vnodeops_t *zfs_xdvnodeops;
+ const fs_operation_def_t zfs_xdvnodeops_template[] = {
+ 	VOPNAME_OPEN,		{ .vop_open = zfs_open },
+ 	VOPNAME_CLOSE,		{ .vop_close = zfs_close },
+@@ -4808,7 +4803,6 @@ const fs_operation_def_t zfs_xdvnodeops_
+ /*
+  * Error vnode operations template
+  */
+-vnodeops_t *zfs_evnodeops;
+ const fs_operation_def_t zfs_evnodeops_template[] = {
+ 	VOPNAME_INACTIVE,	{ .vop_inactive = zfs_inactive },
+ 	VOPNAME_PATHCONF,	{ .vop_pathconf = zfs_pathconf },
+Index: zfs-fuse/src/lib/libsolkerncompat/main.c
+===================================================================
+--- zfs-fuse.orig/src/lib/libsolkerncompat/main.c
++++ zfs-fuse/src/lib/libsolkerncompat/main.c
+@@ -44,6 +44,7 @@ unsigned long _pagesize;
+ unsigned int _pageshift;
+ kmem_cache_t *vnode_cache;
+ extern void system_taskq_init();
++struct utsname utsname;
+ 
+ void libsolkerncompat_init()
+ {

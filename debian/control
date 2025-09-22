@@ -1,16 +1,24 @@
 Source: zfs-fuse
 Section: otherosfs
 Priority: optional
-Maintainer: Sebastien Delafond <seb@debian.org>
-Uploaders: Mike Hommey <glandium@debian.org>
-Build-Depends: debhelper (>= 7.0.50~), scons, libfuse-dev (>= 2.8.1), zlib1g-dev, libaio-dev, libssl-dev, libattr1-dev
-Standards-Version: 3.8.4
+Maintainer: Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>
+XSBC-Original-Maintainer: Debian QA Group <packages@qa.debian.org>
+Build-Depends: debhelper-compat (= 12),
+               libaio-dev,
+               libattr1-dev,
+               libfuse-dev (>= 2.8.7-2),
+               libssl-dev,
+               scons,
+               zlib1g-dev
+Standards-Version: 3.9.8
 Homepage: http://zfs-fuse.net
+Vcs-Git: https://salsa.debian.org/debian/zfs-fuse.git
+Vcs-Browser: https://salsa.debian.org/debian/zfs-fuse
 
 Package: zfs-fuse
-Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, fuse-utils, lsb-base
-Suggests: nfs-kernel-server, kpartx
+Architecture: amd64 armel armhf i386 powerpc powerpcspe ppc64 ppc64el sh4 sparc sparc64
+Depends: fuse, lsb-base, ${misc:Depends}, ${shlibs:Depends}
+Suggests: kpartx, nfs-kernel-server
 Description: ZFS on FUSE
  ZFS is an advanced filesystem from Sun Microsystems, originally developed
  for solaris. It provides a number of advanced features, such as live

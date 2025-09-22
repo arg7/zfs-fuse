@@ -1,8 +1,8 @@
 #! /bin/bash
 ### BEGIN INIT INFO
 # Provides:          zfs-fuse
-# Required-Start:    fuse $remote_fs
-# Required-Stop:     fuse $remote_fs
+# Required-Start:    $remote_fs
+# Required-Stop:     $remote_fs
 # Default-Start:     S
 # Default-Stop:      0 6
 # Short-Description: Daemon for ZFS support via FUSE
@@ -22,31 +22,6 @@ DESC=zfs-fuse
 ENABLE_ZFS=yes
 DAEMON_OPTS="" # deprecated, prefer /etc/zfs/zfsrc
 RESTART_ON_UPGRADE=no
-
-### Fallback functions in case lsb-base isn't available (eg in postinst)
-log_action_begin_msg() {
-    echo -n "$1..."
-}
-
-log_action_cont_msg() {
-    echo -n "$1..."
-}
-
-log_action_end_msg() {
-    echo "$2"
-}
-
-log_daemon_msg() {
-    echo -n "$1: $2"
-}
-
-log_end_msg() {
-    if [ "x$1" = "x0" ]; then
-        echo "ok"
-    else
-        echo "failed"
-    fi
-}
 
 if [ -r /lib/lsb/init-functions ]; then
     . /lib/lsb/init-functions
@@ -119,14 +94,14 @@ do_stop() {
 
 do_start() {
     if is_running; then
-        log_action_msg "zfs-fuse is already running"
-        return 1
+        log_action_msg "zfs-fuse is already running."
+        return 0
     fi
     if [ "x$ENABLE_ZFS" != "xyes" ]; then
-        log_action_msg "Disabled by /etc/default/$NAME" >&2
-        return 1
+        log_action_msg "zfs-fuse is disabled by /etc/default/$NAME." >&2
+        return 0
     fi
-	upgrade_zpool_cache_location
+    upgrade_zpool_cache_location
     log_daemon_msg "Starting $NAME" "zfs-fuse"
     if [ -n "$DAEMON_OPTS" ]; then
         log_action_cont_msg "Warning: use of DAEMON_OPTS deprecated: use /etc/zfs/zfsrc instead"
@@ -141,7 +116,12 @@ do_start() {
     then
         log_end_msg 0
         log_action_begin_msg "Immunizing $NAME against OOM kills and sendsigs signals"
-        echo -17 > /proc/$(cat /var/run/$NAME.pid)/oom_adj
+        if [ -f "/proc/$(cat /var/run/$NAME.pid)/oom_score_adj" ]
+        then
+            echo -1000 > "/proc/$(cat /var/run/$NAME.pid)/oom_score_adj"
+        else
+            echo -17 > "/proc/$(cat /var/run/$NAME.pid)/oom_adj"
+        fi
         ES_TO_REPORT=$?
         if [ "$ES_TO_REPORT" = 0 ] ; then
           log_action_end_msg 0

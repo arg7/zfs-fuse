@@ -1,3 +1,4 @@
+
 /*
  * CDDL HEADER START
  *
@@ -34,7 +35,7 @@
 #include <sys/zfs_vfsops.h>
 #include <sys/zfs_znode.h>
 #include <sys/mode.h>
-#include <attr/xattr.h>
+#include <sys/xattr.h>
 #include <sys/fcntl.h>
 
 #include <string.h>
@@ -392,7 +393,7 @@ static void zfsfuse_getxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
     vnode_t *new_vp = NULL;
     error = VOP_LOOKUP(vp, (char *) name, &new_vp, NULL, 0, NULL, &cred, NULL, NULL, NULL);  
     if (error) {
-	error = ENOATTR;
+	error = ENODATA;
 	goto out;
     }
     VN_RELE(vp);
@@ -468,7 +469,7 @@ out:
     VN_RELE(dvp);
     ZFS_EXIT(zfsvfs);
 	if (error == ENOENT)
-		error = ENOATTR;
+		error = ENODATA;
     fuse_reply_err(req,error);
 }
 

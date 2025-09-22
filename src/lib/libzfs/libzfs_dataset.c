@@ -2433,7 +2433,7 @@ top:
 	(void) strlcpy(zc->zc_name, zhp->zfs_name, sizeof (zc->zc_name));
 	rc = ioctl(zhp->zfs_hdl->libzfs_fd, arg, zc);
 
-	if (rc == -1) {
+	if (rc) {
 		switch (errno) {
 		case ENOMEM:
 			/* expand nvlist memory and try again */

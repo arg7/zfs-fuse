@@ -401,8 +401,12 @@ static void read_cfg() {
 		{
 			// prepend dashes for short or long options
 			const char* original = argv[1];
-			if ('-'!=*original)
-				VERIFY(-1 != asprintf(&argv[1], strlen(original)>1? "--%s" : "-%s", original));
+			int original_len;
+			original_len = strlen(original);
+			if ('-'!=*original) {
+				argv[1] = malloc(original_len + 2);
+				snprintf(argv[1], original_len + 2, strlen(original)>1? "--%s" : "-%s", original);
+			}
 
 			// parse
 			parse_args(argc,argv);

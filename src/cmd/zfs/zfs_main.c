@@ -46,6 +46,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/fs/zfs.h>
+#include <sys/sysmacros.h>
 
 #include <libzfs.h>
 #include <libuutil.h>

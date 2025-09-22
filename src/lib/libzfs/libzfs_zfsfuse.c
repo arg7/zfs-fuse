@@ -37,8 +37,6 @@
 
 #include "libzfs_impl.h"
 
-int aok=0;
-
 int zfsfuse_open(const char *pathname, int flags)
 {
 	struct sockaddr_un name;
