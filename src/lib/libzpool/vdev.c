@@ -1568,7 +1568,7 @@ vdev_dtl_dirty(vdev_t *vd, vdev_dtl_type_t t, uint64_t txg, uint64_t size)
 
 	mutex_enter(sm->sm_lock);
 	if (!space_map_contains(sm, txg, size))
-		space_map_add(sm, txg, size);
+		space_map_add(sm, txg, size, METASLAB_ALLOC_UNKNOWN);
 	mutex_exit(sm->sm_lock);
 }
 
@@ -1659,7 +1659,7 @@ vdev_dtl_reassess(vdev_t *vd, uint64_t txg, uint64_t scrub_txg, int scrub_done)
 			space_map_vacate(&vd->vdev_dtl[DTL_SCRUB], NULL, NULL);
 		space_map_vacate(&vd->vdev_dtl[DTL_OUTAGE], NULL, NULL);
 		if (!vdev_readable(vd))
-			space_map_add(&vd->vdev_dtl[DTL_OUTAGE], 0, -1ULL);
+			space_map_add(&vd->vdev_dtl[DTL_OUTAGE], 0, -1ULL, METASLAB_ALLOC_UNKNOWN);
 		else
 			space_map_walk(&vd->vdev_dtl[DTL_MISSING],
 			    space_map_add, &vd->vdev_dtl[DTL_OUTAGE]);

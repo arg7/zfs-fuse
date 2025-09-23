@@ -79,7 +79,7 @@ space_map_destroy(space_map_t *sm)
 }
 
 void
-space_map_add(space_map_t *sm, uint64_t start, uint64_t size)
+space_map_add(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
 {
 	avl_index_t where;
 	space_seg_t ssearch, *ss_before, *ss_after, *ss;
@@ -147,7 +147,7 @@ space_map_add(space_map_t *sm, uint64_t start, uint64_t size)
 }
 
 void
-space_map_remove(space_map_t *sm, uint64_t start, uint64_t size)
+space_map_remove(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
 {
 	avl_index_t where;
 	space_seg_t ssearch, *ss, *newseg;
@@ -233,7 +233,7 @@ space_map_vacate(space_map_t *sm, space_map_func_t *func, space_map_t *mdest)
 
 	while ((ss = avl_destroy_nodes(&sm->sm_root, &cookie)) != NULL) {
 		if (func != NULL)
-			func(mdest, ss->ss_start, ss->ss_end - ss->ss_start);
+			func(mdest, ss->ss_start, ss->ss_end - ss->ss_start, METASLAB_ALLOC_UNKNOWN);
 		kmem_free(ss, sizeof (*ss));
 	}
 	sm->sm_space = 0;
@@ -247,7 +247,7 @@ space_map_walk(space_map_t *sm, space_map_func_t *func, space_map_t *mdest)
 	ASSERT(MUTEX_HELD(sm->sm_lock));
 
 	for (ss = avl_first(&sm->sm_root); ss; ss = AVL_NEXT(&sm->sm_root, ss))
-		func(mdest, ss->ss_start, ss->ss_end - ss->ss_start);
+		func(mdest, ss->ss_start, ss->ss_end - ss->ss_start, METASLAB_ALLOC_UNKNOWN);
 }
 
 /*
@@ -289,7 +289,7 @@ space_map_load(space_map_t *sm, space_map_ops_t *ops, uint8_t maptype,
 	VERIFY3U(sm->sm_space, ==, 0);
 
 	if (maptype == SM_FREE) {
-		space_map_add(sm, sm->sm_start, sm->sm_size);
+		space_map_add(sm, sm->sm_start, sm->sm_size, METASLAB_ALLOC_UNKNOWN);
 		space = sm->sm_size - space;
 	}
 
@@ -326,7 +326,7 @@ space_map_load(space_map_t *sm, space_map_ops_t *ops, uint8_t maptype,
 			(SM_TYPE_DECODE(e) == maptype ?
 			    space_map_add : space_map_remove)(sm,
 			    (SM_OFFSET_DECODE(e) << sm->sm_shift) + mapstart,
-			    SM_RUN_DECODE(e) << sm->sm_shift);
+			    SM_RUN_DECODE(e) << sm->sm_shift, METASLAB_ALLOC_UNKNOWN);
 		}
 	}
 
@@ -372,27 +372,27 @@ space_map_maxsize(space_map_t *sm)
 }
 
 uint64_t
-space_map_alloc(space_map_t *sm, uint64_t size)
+space_map_alloc(space_map_t *sm, uint64_t size, int obj_type)
 {
 	uint64_t start;
 
-	start = sm->sm_ops->smop_alloc(sm, size);
+	start = sm->sm_ops->smop_alloc(sm, size, obj_type);
 	if (start != -1ULL)
-		space_map_remove(sm, start, size);
+		space_map_remove(sm, start, size, obj_type);
 	return (start);
 }
 
 void
-space_map_claim(space_map_t *sm, uint64_t start, uint64_t size)
+space_map_claim(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
 {
 	sm->sm_ops->smop_claim(sm, start, size);
-	space_map_remove(sm, start, size);
+	space_map_remove(sm, start, size, obj_type);
 }
 
 void
-space_map_free(space_map_t *sm, uint64_t start, uint64_t size)
+space_map_free(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
 {
-	space_map_add(sm, start, size);
+	space_map_add(sm, start, size, obj_type);
 	sm->sm_ops->smop_free(sm, start, size);
 }
 
@@ -606,7 +606,7 @@ space_map_ref_generate_map(avl_tree_t *t, space_map_t *sm, int64_t minref)
 				uint64_t end = sr->sr_offset;
 				ASSERT(start <= end);
 				if (end > start)
-					space_map_add(sm, start, end - start);
+					space_map_add(sm, start, end - start, METASLAB_ALLOC_UNKNOWN);
 				start = -1ULL;
 			}
 		}

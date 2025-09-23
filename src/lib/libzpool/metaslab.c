@@ -34,6 +34,8 @@
 uint64_t metaslab_aliquot = 512ULL << 10;
 uint64_t metaslab_gang_bang = SPA_MAXBLOCKSIZE + 1;	/* force gang blocks */
 
+#define ALLOC_DEBUG
+
 /*
  * Metaslab debugging: when set, keeps all space maps in core to verify frees.
  */
@@ -459,7 +461,7 @@ metaslab_pp_maxsize(space_map_t *sm)
  * ==========================================================================
  */
 static uint64_t
-metaslab_ff_alloc(space_map_t *sm, uint64_t size)
+metaslab_ff_alloc(space_map_t *sm, uint64_t size, int obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	uint64_t align = size & -size;
@@ -494,7 +496,7 @@ static space_map_ops_t metaslab_ff_ops = {
  * ==========================================================================
  */
 static uint64_t
-metaslab_df_alloc(space_map_t *sm, uint64_t size)
+metaslab_df_alloc(space_map_t *sm, uint64_t size, int obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	uint64_t align = size & -size;
@@ -517,8 +519,11 @@ metaslab_df_alloc(space_map_t *sm, uint64_t size)
 		t = sm->sm_pp_root;
 		*cursor = 0;
 	}
-
-	return (metaslab_block_picker(t, cursor, size, 1ULL));
+	uint64_t ret = metaslab_block_picker(t, cursor, size, 1ULL);
+#ifdef ALLOC_DEBUG
+	printf("metaslab_df_alloc(size=%i, obj_type=%c)=> 0x%016" PRIx64 "\n", (int)size, obj_type == METASLAB_ALLOC_DATA?'D':'M', ret);
+#endif
+	return ret;
 }
 
 static boolean_t
@@ -550,7 +555,7 @@ static space_map_ops_t metaslab_df_ops = {
  * ==========================================================================
  */
 static uint64_t
-metaslab_cdf_alloc(space_map_t *sm, uint64_t size)
+metaslab_cdf_alloc(space_map_t *sm, uint64_t size, int obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	uint64_t *cursor = (uint64_t *)sm->sm_ppd;
@@ -609,7 +614,7 @@ static space_map_ops_t metaslab_cdf_ops = {
 };
 
 static uint64_t
-metaslab_ndf_alloc(space_map_t *sm, uint64_t size)
+metaslab_ndf_alloc(space_map_t *sm, uint64_t size, int obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	avl_index_t where;
@@ -972,7 +977,7 @@ metaslab_sync(metaslab_t *msp, uint64_t txg)
 		space_map_vacate(allocmap, NULL, NULL);
 		space_map_vacate(freemap, NULL, NULL);
 
-		space_map_add(allocmap, allocmap->sm_start, allocmap->sm_size);
+		space_map_add(allocmap, allocmap->sm_start, allocmap->sm_size, METASLAB_ALLOC_UNKNOWN);
 
 		space_map_walk(sm, space_map_remove, allocmap);
 		space_map_walk(freed_map, space_map_remove, allocmap);
@@ -1140,7 +1145,7 @@ metaslab_distance(metaslab_t *msp, dva_t *dva)
 
 static uint64_t
 metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
-    uint64_t min_distance, dva_t *dva, int d)
+    uint64_t min_distance, dva_t *dva, int d, int obj_type)
 {
 	metaslab_t *msp = NULL;
 	uint64_t offset = -1ULL;
@@ -1213,7 +1218,7 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
 			continue;
 		}
 
-		if ((offset = space_map_alloc(&msp->ms_map, size)) != -1ULL)
+		if ((offset = space_map_alloc(&msp->ms_map, size, obj_type)) != -1ULL)
 			break;
 
 		metaslab_passivate(msp, space_map_maxsize(&msp->ms_map));
@@ -1224,7 +1229,7 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
 	if (msp->ms_allocmap[txg & TXG_MASK].sm_space == 0)
 		vdev_dirty(mg->mg_vd, VDD_METASLAB, msp, txg);
 
-	space_map_add(&msp->ms_allocmap[txg & TXG_MASK], offset, size);
+	space_map_add(&msp->ms_allocmap[txg & TXG_MASK], offset, size, obj_type);
 
 	mutex_exit(&msp->ms_lock);
 
@@ -1236,7 +1241,7 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
  */
 static int
 metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags)
+    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags, int obj_type)
 {
 	metaslab_group_t *mg, *rotor;
 	vdev_t *vd;
@@ -1351,7 +1356,7 @@ top:
 		asize = vdev_psize_to_asize(vd, psize);
 		ASSERT(P2PHASE(asize, 1ULL << vd->vdev_ashift) == 0);
 
-		offset = metaslab_group_alloc(mg, asize, txg, distance, dva, d);
+		offset = metaslab_group_alloc(mg, asize, txg, distance, dva, d, obj_type);
 		if (offset != -1ULL) {
 			/*
 			 * If we've just selected this metaslab group,
@@ -1447,12 +1452,12 @@ metaslab_free_dva(spa_t *spa, const dva_t *dva, uint64_t txg, boolean_t now)
 
 	if (now) {
 		space_map_remove(&msp->ms_allocmap[txg & TXG_MASK],
-		    offset, size);
-		space_map_free(&msp->ms_map, offset, size);
+		    offset, size, METASLAB_ALLOC_UNKNOWN);
+		space_map_free(&msp->ms_map, offset, size, METASLAB_ALLOC_UNKNOWN);
 	} else {
 		if (msp->ms_freemap[txg & TXG_MASK].sm_space == 0)
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
-		space_map_add(&msp->ms_freemap[txg & TXG_MASK], offset, size);
+		space_map_add(&msp->ms_freemap[txg & TXG_MASK], offset, size, METASLAB_ALLOC_UNKNOWN);
 	}
 
 	mutex_exit(&msp->ms_lock);
@@ -1498,12 +1503,12 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva, uint64_t txg)
 		return (error);
 	}
 
-	space_map_claim(&msp->ms_map, offset, size);
+	space_map_claim(&msp->ms_map, offset, size, METASLAB_ALLOC_UNKNOWN);
 
 	if (spa_writeable(spa)) {	/* don't dirty if we're zdb(1M) */
 		if (msp->ms_allocmap[txg & TXG_MASK].sm_space == 0)
 			vdev_dirty(vd, VDD_METASLAB, msp, txg);
-		space_map_add(&msp->ms_allocmap[txg & TXG_MASK], offset, size);
+		space_map_add(&msp->ms_allocmap[txg & TXG_MASK], offset, size, METASLAB_ALLOC_UNKNOWN);
 	}
 
 	mutex_exit(&msp->ms_lock);
@@ -1513,7 +1518,7 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva, uint64_t txg)
 
 int
 metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
-    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags)
+    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags, int obj_type)
 {
 	dva_t *dva = bp->blk_dva;
 	dva_t *hintdva = hintbp->blk_dva;
@@ -1535,7 +1540,7 @@ metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
 
 	for (int d = 0; d < ndvas; d++) {
 		error = metaslab_alloc_dva(spa, mc, psize, dva, d, hintdva,
-		    txg, flags);
+		    txg, flags, obj_type);
 		if (error) {
 			for (d--; d >= 0; d--) {
 				metaslab_free_dva(spa, &dva[d], txg, B_TRUE);
@@ -1601,4 +1606,10 @@ metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
 	ASSERT(error == 0 || txg == 0);
 
 	return (error);
+}
+
+uint64_t 
+obj_alloc_class(dmu_object_type_t ot)
+{
+	return ot == DMU_OT_PLAIN_FILE_CONTENTS?METASLAB_ALLOC_DATA:METASLAB_ALLOC_METADATA;
 }
