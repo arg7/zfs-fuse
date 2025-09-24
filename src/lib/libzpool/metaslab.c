@@ -31,10 +31,23 @@
 #include <sys/vdev_impl.h>
 #include <sys/zio.h>
 
+#include <sys/dmu_objset.h>
+#include <time.h>
+
 uint64_t metaslab_aliquot = 512ULL << 10;
 uint64_t metaslab_gang_bang = SPA_MAXBLOCKSIZE + 1;	/* force gang blocks */
 
 #define ALLOC_DEBUG
+
+/**
+ * container_of - cast a member of a structure out to the containing structure
+ * @ptr:        the pointer to the member.
+ * @type:       the type of the container struct this is embedded in.
+ * @member:     the name of the member within the struct.
+ */
+#define container_of(ptr, type, member) ({                      \
+        const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
+        (type *)( (char *)__mptr - offsetof(type,member) );})
 
 /*
  * Metaslab debugging: when set, keeps all space maps in core to verify frees.
@@ -461,7 +474,7 @@ metaslab_pp_maxsize(space_map_t *sm)
  * ==========================================================================
  */
 static uint64_t
-metaslab_ff_alloc(space_map_t *sm, uint64_t size, int obj_type)
+metaslab_ff_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	uint64_t align = size & -size;
@@ -487,6 +500,73 @@ static space_map_ops_t metaslab_ff_ops = {
 	metaslab_ff_fragmented
 };
 
+
+static const char *
+get_obj_type_name(dmu_object_type_t obj_type)
+{
+	static const char* type_map[] = {
+		"DMU_OT_NONE",
+		/* general: */
+		"DMU_OT_OBJECT_DIRECTORY",	/* ZAP */
+		"DMU_OT_OBJECT_ARRAY",		/* UINT64 */
+		"DMU_OT_PACKED_NVLIST",		/* UINT8 (XDR by nvlist_pack/unpack) */
+		"DMU_OT_PACKED_NVLIST_SIZE",	/* UINT64 */
+		"DMU_OT_BPLIST",			/* UINT64 */
+		"DMU_OT_BPLIST_HDR",		/* UINT64 */
+		/* spa: */
+		"DMU_OT_SPACE_MAP_HEADER",	/* UINT64 */
+		"DMU_OT_SPACE_MAP",		/* UINT64 */
+		/* zil: */
+		"DMU_OT_INTENT_LOG",		/* UINT64 */
+		/* dmu: */
+		"DMU_OT_DNODE",			/* DNODE */
+		"DMU_OT_OBJSET",			/* OBJSET */
+		/* dsl: */
+		"DMU_OT_DSL_DIR",			/* UINT64 */
+		"DMU_OT_DSL_DIR_CHILD_MAP",	/* ZAP */
+		"DMU_OT_DSL_DS_SNAP_MAP",		/* ZAP */
+		"DMU_OT_DSL_PROPS",		/* ZAP */
+		"DMU_OT_DSL_DATASET",		/* UINT64 */
+		/* zpl: */
+		"DMU_OT_ZNODE",			/* ZNODE */
+		"DMU_OT_OLDACL",			/* Old ACL */
+		"DMU_OT_PLAIN_FILE_CONTENTS",	/* UINT8 */
+		"DMU_OT_DIRECTORY_CONTENTS",	/* ZAP */
+		"DMU_OT_MASTER_NODE",		/* ZAP */
+		"DMU_OT_UNLINKED_SET",		/* ZAP */
+		/* zvol: */
+		"DMU_OT_ZVOL",			/* UINT8 */
+		"DMU_OT_ZVOL_PROP",		/* ZAP */
+		/* other; for testing only! */
+		"DMU_OT_PLAIN_OTHER",		/* UINT8 */
+		"DMU_OT_UINT64_OTHER",		/* UINT64 */
+		"DMU_OT_ZAP_OTHER",		/* ZAP */
+		/* new object types: */
+		"DMU_OT_ERROR_LOG",		/* ZAP */
+		"DMU_OT_SPA_HISTORY",		/* UINT8 */
+		"DMU_OT_SPA_HISTORY_OFFSETS",	/* spa_his_phys_t */
+		"DMU_OT_POOL_PROPS",		/* ZAP */
+		"DMU_OT_DSL_PERMS",		/* ZAP */
+		"DMU_OT_ACL",			/* ACL */
+		"DMU_OT_SYSACL",			/* SYSACL */
+		"DMU_OT_FUID",			/* FUID table (Packed NVLIST UINT8) */
+		"DMU_OT_FUID_SIZE",		/* FUID table size UINT64 */
+		"DMU_OT_NEXT_CLONES",		/* ZAP */
+		"DMU_OT_SCRUB_QUEUE",		/* ZAP */
+		"DMU_OT_USERGROUP_USED",		/* ZAP */
+		"DMU_OT_USERGROUP_QUOTA",		/* ZAP */
+		"DMU_OT_USERREFS",		/* ZAP */
+		"DMU_OT_DDT_ZAP",			/* ZAP */
+		"DMU_OT_DDT_STATS",		/* ZAP */
+		"DMU_OT_NUMTYPES"
+	};
+
+	if (obj_type > DMU_OT_NUMTYPES) 
+		return "DMU_OT_UNKNOWN";
+	
+	return type_map[obj_type];
+}
+
 /*
  * ==========================================================================
  * Dynamic block allocator -
@@ -496,7 +576,7 @@ static space_map_ops_t metaslab_ff_ops = {
  * ==========================================================================
  */
 static uint64_t
-metaslab_df_alloc(space_map_t *sm, uint64_t size, int obj_type)
+metaslab_df_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	uint64_t align = size & -size;
@@ -519,9 +599,35 @@ metaslab_df_alloc(space_map_t *sm, uint64_t size, int obj_type)
 		t = sm->sm_pp_root;
 		*cursor = 0;
 	}
+
+	uint64_t cur = *cursor;
 	uint64_t ret = metaslab_block_picker(t, cursor, size, 1ULL);
+
 #ifdef ALLOC_DEBUG
-	printf("metaslab_df_alloc(size=%i, obj_type=%c)=> 0x%016" PRIx64 "\n", (int)size, obj_type == METASLAB_ALLOC_DATA?'D':'M', ret);
+	static char* hints[] = {"hit ", "near", "far "};
+	char *phint;
+
+	static time_t tm_last = 0;
+	time_t tm_now;
+
+	time(&tm_now);
+	struct tm *tmp = localtime(&tm_now);
+
+	char buf[32] = {0};
+
+	if (difftime(tm_now, tm_last) > 1) {
+		strftime(buf, sizeof(buf), "%H:%M:%S", tmp);
+	}
+
+	tm_last = tm_now;
+
+	uint64_t d = ret-cur;
+	if (d == 0) phint = hints[0];
+	else if (abs(d) < 0x10000) phint = hints[1]; // 64K
+	else phint = hints[2];
+
+	uint64_t absolute_offset = 0x400000 + ret;
+	printf("%8s metaslab_df_alloc(size=0x%04x)=> 0x%016" PRIx64 " -> hint=%s, obj_type=%s\n", buf, (int)size, absolute_offset, phint, get_obj_type_name(obj_type));
 #endif
 	return ret;
 }
@@ -555,7 +661,7 @@ static space_map_ops_t metaslab_df_ops = {
  * ==========================================================================
  */
 static uint64_t
-metaslab_cdf_alloc(space_map_t *sm, uint64_t size, int obj_type)
+metaslab_cdf_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	uint64_t *cursor = (uint64_t *)sm->sm_ppd;
@@ -614,7 +720,7 @@ static space_map_ops_t metaslab_cdf_ops = {
 };
 
 static uint64_t
-metaslab_ndf_alloc(space_map_t *sm, uint64_t size, int obj_type)
+metaslab_ndf_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 {
 	avl_tree_t *t = &sm->sm_root;
 	avl_index_t where;
@@ -1145,7 +1251,7 @@ metaslab_distance(metaslab_t *msp, dva_t *dva)
 
 static uint64_t
 metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
-    uint64_t min_distance, dva_t *dva, int d, int obj_type)
+    uint64_t min_distance, dva_t *dva, int d, dmu_object_type_t obj_type)
 {
 	metaslab_t *msp = NULL;
 	uint64_t offset = -1ULL;
@@ -1241,7 +1347,7 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
  */
 static int
 metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags, int obj_type)
+    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags, dmu_object_type_t obj_type)
 {
 	metaslab_group_t *mg, *rotor;
 	vdev_t *vd;
@@ -1518,7 +1624,7 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva, uint64_t txg)
 
 int
 metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
-    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags, int obj_type)
+    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags, dmu_object_type_t obj_type)
 {
 	dva_t *dva = bp->blk_dva;
 	dva_t *hintdva = hintbp->blk_dva;
@@ -1606,10 +1712,4 @@ metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
 	ASSERT(error == 0 || txg == 0);
 
 	return (error);
-}
-
-uint64_t 
-obj_alloc_class(dmu_object_type_t ot)
-{
-	return ot == DMU_OT_PLAIN_FILE_CONTENTS?METASLAB_ALLOC_DATA:METASLAB_ALLOC_METADATA;
 }

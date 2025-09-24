@@ -2128,7 +2128,7 @@ zio_dva_allocate(zio_t *zio)
 
 	error = metaslab_alloc(spa, mc, zio->io_size, bp,
 	    zio->io_prop.zp_copies, zio->io_txg, NULL, 0,
-		obj_alloc_class(obj_type)
+		obj_type
 	);
 
 	if (error) {

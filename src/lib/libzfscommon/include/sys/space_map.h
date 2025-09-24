@@ -73,7 +73,7 @@ typedef struct space_map_obj {
 struct space_map_ops {
 	void	(*smop_load)(space_map_t *sm);
 	void	(*smop_unload)(space_map_t *sm);
-	uint64_t (*smop_alloc)(space_map_t *sm, uint64_t size, int obj_type);
+	uint64_t (*smop_alloc)(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type);
 	void	(*smop_claim)(space_map_t *sm, uint64_t start, uint64_t size);
 	void	(*smop_free)(space_map_t *sm, uint64_t start, uint64_t size);
 	uint64_t (*smop_max)(space_map_t *sm);
@@ -134,13 +134,13 @@ struct space_map_ops {
  */
 #define	SPACE_MAP_BLOCKSHIFT	12
 
-typedef void space_map_func_t(space_map_t *sm, uint64_t start, uint64_t size, int obj_type);
+typedef void space_map_func_t(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type);
 
 extern void space_map_create(space_map_t *sm, uint64_t start, uint64_t size,
     uint8_t shift, kmutex_t *lp);
 extern void space_map_destroy(space_map_t *sm);
-extern void space_map_add(space_map_t *sm, uint64_t start, uint64_t size, int obj_type);
-extern void space_map_remove(space_map_t *sm, uint64_t start, uint64_t sizee, int obj_type);
+extern void space_map_add(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type);
+extern void space_map_remove(space_map_t *sm, uint64_t start, uint64_t sizee, dmu_object_type_t obj_type);
 extern boolean_t space_map_contains(space_map_t *sm,
     uint64_t start, uint64_t size);
 extern void space_map_vacate(space_map_t *sm,
@@ -153,9 +153,9 @@ extern int space_map_load(space_map_t *sm, space_map_ops_t *ops,
     uint8_t maptype, space_map_obj_t *smo, objset_t *os);
 extern void space_map_unload(space_map_t *sm);
 
-extern uint64_t space_map_alloc(space_map_t *sm, uint64_t size, int obj_type);
-extern void space_map_claim(space_map_t *sm, uint64_t start, uint64_t size, int obj_type);
-extern void space_map_free(space_map_t *sm, uint64_t start, uint64_t size, int obj_type);
+extern uint64_t space_map_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type);
+extern void space_map_claim(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type);
+extern void space_map_free(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type);
 extern uint64_t space_map_maxsize(space_map_t *sm);
 
 extern void space_map_sync(space_map_t *sm, uint8_t maptype,
@@ -172,9 +172,9 @@ extern void space_map_ref_add_map(avl_tree_t *t,
 extern void space_map_ref_generate_map(avl_tree_t *t,
     space_map_t *sm, int64_t minref);
 
-#define METASLAB_ALLOC_UNKNOWN  0x0
-#define METASLAB_ALLOC_DATA     0x1
-#define METASLAB_ALLOC_METADATA 0x2
+#define METASLAB_ALLOC_UNKNOWN  (DMU_OT_NUMTYPES+1)
+//#define METASLAB_ALLOC_DATA     0x1
+//#define METASLAB_ALLOC_METADATA 0x2
 
 
 #ifdef	__cplusplus

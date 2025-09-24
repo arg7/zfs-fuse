@@ -689,7 +689,7 @@ dump_all_ddts(spa_t *spa)
 }
 
 static void
-dump_dtl_seg(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
+dump_dtl_seg(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type)
 {
 	char *prefix = (void *)sm;
 
@@ -1849,7 +1849,7 @@ zdb_blkptr_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 }
 
 static void
-zdb_leak(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
+zdb_leak(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type)
 {
 	vdev_t *vd = sm->sm_ppd;
 

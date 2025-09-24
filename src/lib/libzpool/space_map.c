@@ -79,7 +79,7 @@ space_map_destroy(space_map_t *sm)
 }
 
 void
-space_map_add(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
+space_map_add(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type)
 {
 	avl_index_t where;
 	space_seg_t ssearch, *ss_before, *ss_after, *ss;
@@ -147,7 +147,7 @@ space_map_add(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
 }
 
 void
-space_map_remove(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
+space_map_remove(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type)
 {
 	avl_index_t where;
 	space_seg_t ssearch, *ss, *newseg;
@@ -372,7 +372,7 @@ space_map_maxsize(space_map_t *sm)
 }
 
 uint64_t
-space_map_alloc(space_map_t *sm, uint64_t size, int obj_type)
+space_map_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 {
 	uint64_t start;
 
@@ -383,14 +383,14 @@ space_map_alloc(space_map_t *sm, uint64_t size, int obj_type)
 }
 
 void
-space_map_claim(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
+space_map_claim(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type)
 {
 	sm->sm_ops->smop_claim(sm, start, size);
 	space_map_remove(sm, start, size, obj_type);
 }
 
 void
-space_map_free(space_map_t *sm, uint64_t start, uint64_t size, int obj_type)
+space_map_free(space_map_t *sm, uint64_t start, uint64_t size, dmu_object_type_t obj_type)
 {
 	space_map_add(sm, start, size, obj_type);
 	sm->sm_ops->smop_free(sm, start, size);

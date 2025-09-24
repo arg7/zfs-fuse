@@ -50,7 +50,7 @@ extern void metaslab_sync_reassess(metaslab_group_t *mg);
 #define	METASLAB_GANG_HEADER	0x2
 
 extern int metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp, int flags, int obj_type);
+    blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp, int flags, dmu_object_type_t obj_type);
 extern void metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg,
     boolean_t now);
 extern int metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg);
@@ -74,18 +74,29 @@ extern void metaslab_group_destroy(metaslab_group_t *mg);
 extern void metaslab_group_activate(metaslab_group_t *mg);
 extern void metaslab_group_passivate(metaslab_group_t *mg);
 
-extern uint64_t obj_alloc_class(dmu_object_type_t ot);
+//extern uint64_t obj_alloc_class(dmu_object_type_t ot);
 
-typedef struct gpid_alloc_context {
-    avl_node_t  psc_node;
-    pid_t       psc_gpid;
-    uint64_t    psc_metaslab_id;
-    uint64_t    psc_segment_start;  // ← original segment start (new)
-    uint64_t    psc_segment_end;    // ← original segment end (unchanged)
-    uint64_t    psc_cursor;         // ← current write head
-    uint64_t    psc_chunk_size;     // ← max this PID can consume (capped)
-    uint64_t    psc_last_used;
-} pid_alloc_context_t;
+typedef enum alloc_bias_type {
+    AB_NONE,
+    AB_STREAMING
+} alloc_bias_type_t;
+
+typedef struct alloc_bias_context {
+    avl_node_t         abc_node;
+    alloc_bias_type_t  abc_type;
+    uint64_t           abc_key;
+    char               abc_private_data[]; // This MUST be the LAST member of the struct
+} alloc_bias_context_t;
+
+typedef struct abc_streaming_data {
+    pid_t       stc_gpid;
+    metaslab_t* stc_metaslab;
+    uint64_t    stc_segment_start;  // ← original segment start (new)
+    uint64_t    stc_segment_end;    // ← original segment end (unchanged)
+    uint64_t    stc_cursor;         // ← current write head
+    uint64_t    stc_chunk_size;     // ← max this PID can consume (capped)
+    uint64_t    stc_last_used;
+};
 
 #ifdef	__cplusplus
 }
