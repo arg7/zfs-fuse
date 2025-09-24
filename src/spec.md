@@ -2,6 +2,16 @@
 
 ### **Specification: Streaming Allocator for Archival Workloads (v 1.3)**
 
+
+#### Preface: Solving the Archival Performance Gap in ZFS
+In large-scale archival workloads, such as legal document repositories, financial record storage, and backup systems, ZFS performance on spinning disks is frequently dominated by disk head seeks, not raw bandwidth. This issue is most acute when millions of small files are written concurrently.
+The default ZFS allocator strategies, optimized for general-purpose use, tend to scatter data and metadata blocks across the entire pool. This behavior destroys the spatial locality essential for efficient disk access. The result is a significant performance degradation—often 10x to 100x slower than theoretically possible—especially for metadata-intensive operations like find, ls -lR, zfs send, and zpool scrub.
+To address this critical performance gap, this document specifies a new, workload-aware allocator, activated by the allocation=archive_concurrent dataset property. The core design aims to restore spatial locality by:
+Ensuring a contiguous on-disk layout for related writes.
+Isolating concurrent writers (by Process Group ID) to prevent I/O stream interleaving.
+Separating data and metadata allocations into distinct, linear streams to optimize access patterns and dramatically improve prefetching.
+The following specification provides a detailed technical blueprint of this allocator's algorithms, data structures, and state management, designed to be robust, crash-safe, and highly performant.
+
 #### 1. Overview & Core Principles
 
 This document specifies the design of a specialized ZFS allocator, activated by the dataset property `allocation=streaming`. Its primary goal is to optimize performance for write-heavy, concurrent archival workloads by ensuring spatial locality for both data and metadata streams.
@@ -330,4 +340,5 @@ classDiagram
 *   A `vdev_t` (vdev) contains the single, fixed-size array of `alloc_bias_context_t`s.
 *   A `vdev_t` also contains many `metaslab_t`s.
 *   An `alloc_bias_context_t` (a stream context) holds a pointer to exactly **one** `metaslab_t` where its reservation lives.
+
 *   The `ml_bias_reservations` counter on a `metaslab_t` implicitly tracks how many contexts are currently pointing to it, serving as a hint for load balancing. for load balancing.
