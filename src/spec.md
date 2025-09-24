@@ -6,7 +6,7 @@
 #### Preface: Solving the Archival Performance Gap in ZFS
 In large-scale archival workloads, such as legal document repositories, financial record storage, and backup systems, ZFS performance on spinning disks is frequently dominated by disk head seeks, not raw bandwidth. This issue is most acute when millions of small files are written concurrently.
 The default ZFS allocator strategies, optimized for general-purpose use, tend to scatter data and metadata blocks across the entire pool. This behavior destroys the spatial locality essential for efficient disk access. The result is a significant performance degradation—often 10x to 100x slower than theoretically possible—especially for metadata-intensive operations like find, ls -lR, zfs send, and zpool scrub.
-To address this critical performance gap, this document specifies a new, workload-aware allocator, activated by the allocation=archive_concurrent dataset property. The core design aims to restore spatial locality by:
+To address this critical performance gap, this document specifies a new, workload-aware allocator, activated by the `allocation=streaming` dataset property. The core design aims to restore spatial locality by:
 Ensuring a contiguous on-disk layout for related writes.
 Isolating concurrent writers (by Process Group ID) to prevent I/O stream interleaving.
 Separating data and metadata allocations into distinct, linear streams to optimize access patterns and dramatically improve prefetching.
@@ -127,7 +127,7 @@ The allocator is controlled by a dataset property and several module parameters 
   
 #### 4. Core Algorithm I: New Stream Activation
 
-This logic is executed when a write occurs for a PGID+StreamType that does not have an existing active context.
+This logic is executed when a write occurs for a PGID that does not have an existing active context.
 
 **Initial Step: Check for Free Context Slot**
 
@@ -180,7 +180,7 @@ This logic is executed when a write occurs for a PGID+StreamType that does not h
 
 #### 5. Core Algorithm II: Allocation within an Active Stream
 
-This logic is executed when an active context for the PGID+StreamType already exists.
+This logic is executed when an active context for the PGID already exists.
 
 1.  **Chunk Chaining Logic:** If the current chunk is depleted, attempt to chain to a new one within the same reservation. If the reservation is exhausted, clear the context (`abc_gpid = 0`), decrement the metaslab's reservation counter, and restart the allocation process from Algorithm I to find a new home for the stream.
 
@@ -192,13 +192,13 @@ This logic is executed when an active context for the PGID+StreamType already ex
 
 *  **If `actual_offset == hint_offset` (Success):** Advance the cursor and update the timestamp.
 
-*  **If `actual_offset != hint_offset` (Conflict):** The context is invalid. Clear the context slot (`abc_gpid = 0`), decrement the metaslab's reservation counter, and restart the allocation process from Algorithm I.
+*  **If `actual_offset != hint_offset` (Conflict):** The context is invalid. Clear the context slot (`abc_gpid = 0`), decrement the metaslab's reservation counter, and check if actual block was allocated on different address, if yes, keep it, otherwise fallback to defaul allocator  .
 
 #### 6. State Management & Cleanup
 
 Cleanup is performed lazily during `spa_sync()`. A `spa_sync()` thread will scan the `vdev_alloc_bias_contexts` array. For each in-use entry, it checks for timeout:
 
-* If `(current_time - context->abc_last_used) > pid_timeout`, the context is considered stale.
+* If `(current_time - context->abc_last_used) > streaming:context_timeout`, the context is considered stale.
 
 * The entry is cleared by setting `context->abc_gpid = 0`.
 
@@ -210,7 +210,7 @@ Cleanup is performed lazily during `spa_sync()`. A `spa_sync()` thread will scan
 
 ```mermaid
 graph TD
-    A((PGID->write)) --> B{Is `archive_concurrent` enabled?};
+    A((PGID->write)) --> B{Is `streaming` enabled?};
     B -- No --> C[Default Allocator];
     B -- Yes --> D{Active Context Exists?};
     
@@ -342,3 +342,4 @@ classDiagram
 *   An `alloc_bias_context_t` (a stream context) holds a pointer to exactly **one** `metaslab_t` where its reservation lives.
 
 *   The `ml_bias_reservations` counter on a `metaslab_t` implicitly tracks how many contexts are currently pointing to it, serving as a hint for load balancing. for load balancing.
+
