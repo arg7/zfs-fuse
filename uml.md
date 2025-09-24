@@ -14,10 +14,14 @@ graph TD
     
     D -- Yes --> ALG2_PRE(Pre-Allocation Checks);
     ALG2_PRE --> K{Chunk has space?};
-    K -- No --> L{Can Chain to New Chunk?};
-    L -- No --> S[Invalidate Context];
     K -- Yes --> F;
-    L -- Yes --> F;
+    K -- No --> L{Can Chain to New Chunk?};
+    
+    L -- Yes --> Adjust_Chain[Adjust Context for New Chunk];
+    Adjust_Chain --> F;
+    
+    L -- No --> Invalidate_and_Retry[Invalidate Context & Retry Allocation];
+    Invalidate_and_Retry --> ALG1;
 
     F --> M[Attempt Allocation at Hint];
     M --> N{Hint == Actual Block?};
@@ -25,8 +29,10 @@ graph TD
     N -- Yes (Success) --> T[Advance Cursor & Timestamp];
     T --> SUCCESS[Success];
     
-    N -- No (Conflict) --> S;
-    S --> SUCCESS;
+    N -- No (Conflict) --> Invalidate_And_Check[Invalidate Context & Check Status];
+    Invalidate_And_Check --> O{Was a Block Allocated *Anywhere*?};
+    O -- Yes --> SUCCESS;
+    O -- No --> C;
 
     C --> R{ok?};
     R -- No --> FAIL[Fail I/O];
@@ -34,5 +40,4 @@ graph TD
 
     FAIL --> X((End));
     SUCCESS --> X((End));
-
 ```
