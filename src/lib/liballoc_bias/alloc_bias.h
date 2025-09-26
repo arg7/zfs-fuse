@@ -23,10 +23,9 @@ typedef struct alloc_bias_context alloc_bias_context_t;
  * @brief The "Question" from the core allocator to the bias engine.
  */
 typedef struct alloc_bias_req {
-	zio_t           *abr_zio;
-	uint64_t         abr_size;
-	metaslab_class_t *abr_mc;
-	void            *abr_hint_handle; // Opaque handle to the original hint (e.g., blkptr_t*).
+	zio_t            *abr_zio;
+	uint64_t          abr_size;
+	alloc_bias_hint_t *abr_hint_handle;
 } alloc_bias_req_t;
 
 /**

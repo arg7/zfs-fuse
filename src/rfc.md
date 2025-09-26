@@ -1,8 +1,8 @@
 ### 📜 RFC: A Generic Allocation Bias Framework and Streaming Engine for ZFS
 
 **Status:** Proposed (Revised Architecture)
-**Author:** AR & Gemini
-**OpenZFS-Version:** 2.2+
+**Author:** AR
+**ZFS-FUSE:** 0.7.0
 **Date:** 2025-09-25
 
 #### 1. Problem Statement
