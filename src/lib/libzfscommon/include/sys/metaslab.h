@@ -31,6 +31,7 @@
 #include <sys/txg.h>
 #include <sys/zio.h>
 #include <sys/avl.h>
+#include <sys/alloc_bias.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -76,27 +77,9 @@ extern void metaslab_group_passivate(metaslab_group_t *mg);
 
 //extern uint64_t obj_alloc_class(dmu_object_type_t ot);
 
-typedef enum alloc_bias_type {
-    AB_NONE,
-    AB_STREAMING
-} alloc_bias_type_t;
+#define  alloc_bias_max 8
 
-typedef struct alloc_bias_context {
-    avl_node_t         abc_node;
-    alloc_bias_type_t  abc_type;
-    uint64_t           abc_key;
-    char               abc_private_data[]; // This MUST be the LAST member of the struct
-} alloc_bias_context_t;
-
-typedef struct abc_streaming_data {
-    pid_t       stc_gpid;
-    metaslab_t* stc_metaslab;
-    uint64_t    stc_segment_start;  // ← original segment start (new)
-    uint64_t    stc_segment_end;    // ← original segment end (unchanged)
-    uint64_t    stc_cursor;         // ← current write head
-    uint64_t    stc_chunk_size;     // ← max this PID can consume (capped)
-    uint64_t    stc_last_used;
-};
+static alloc_bias_context_t alloc_bias_contexts[alloc_bias_max] = {};
 
 #ifdef	__cplusplus
 }
