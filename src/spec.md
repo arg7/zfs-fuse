@@ -189,43 +189,43 @@ Decision tree for allocation requests.
 
 ```mermaid
 graph TD
-    A((Key->write)) --> B{Is `streaming` enabled?};
-    B -- No --> C[Default Allocator];
+    A((Allocation Request)) --> B{Is `streaming` enabled?};
+    B -- No --> C[Use Default Allocator];
     B -- Yes --> D{Active Context Exists?};
     
-    D -- No --> ALG1(Execute Algorithm I);
+    D -- No --> ALG1(Execute Algorithm I: New Stream Activation);
     ALG1 --> H{Action?};
-    H -- FALLBACK --> C;
-    H -- CREATE_NEW_CONTEXT --> F[Get Context Hint];
+    H -- BIAS_ACTION_FALLBACK --> C;
+    H -- BIAS_ACTION_CREATE_NEW_CONTEXT --> F[Get Hint via abo_get_hint_fn];
     
     D -- Yes --> ALG2_PRE(Pre-Allocation Checks);
-    ALG2_PRE --> K{Chunk has space?};
+    ALG2_PRE --> K{Current chunk has space?};
     K -- Yes --> F;
-    K -- No --> L{Can Chain to New Chunk?};
+    K -- No --> L{Can chain to new chunk?};
     
-    L -- Yes --> Adjust_Chain[Adjust Context for New Chunk];
+    L -- Yes --> Adjust_Chain[Adjust context for new chunk];
     Adjust_Chain --> F;
     
-    L -- No --> Invalidate_and_Retry[Invalidate Context & Retry];
+    L -- No --> Invalidate_and_Retry[Invalidate context & retry];
     Invalidate_and_Retry --> ALG1;
 
-    F --> M[Attempt Allocation at Hint];
-    M --> N{Hint == Actual Block?};
+    F --> M[Attempt allocation at hint];
+    M --> N{Actual offset == hint offset?};
     
-    N -- Yes --> T[Advance Cursor & Timestamp];
+    N -- Yes --> T[Call abo_advance_fn];
     T --> SUCCESS[Success];
     
-    N -- No --> Invalidate_And_Check[Invalidate Context & Check Status];
-    Invalidate_And_Check --> O{Was a Block Allocated?};
+    N -- No --> Invalidate_And_Check[Invalidate context];
+    Invalidate_And_Check --> O{Was a block allocated?};
     O -- Yes --> SUCCESS;
     O -- No --> C;
 
-    C --> R{ok?};
+    C --> R{Allocation succeeded?};
     R -- No --> FAIL[Fail I/O];
     R -- Yes --> SUCCESS;
 
     FAIL --> X((End));
-    SUCCESS --> X((End));
+    SUCCESS --> X((End));    
 ```
 
 ##### Algorithm I: New Stream Activation
@@ -233,17 +233,17 @@ Three-tiered logic for creating a new stream.
 
 ```mermaid
 graph TD
-    A[Start: New Stream Needed] --> B{Context Limit Reached?};
+    A[Start: New stream needed] --> B{Context limit reached?};
     B -- Yes --> Z[Return BIAS_ACTION_FALLBACK];
 
-    B -- No --> T1_Start(Tier 1: Find Ideal Metaslab);
-    T1_Start --> T1_Check{Find metaslab with fewest contexts<br/>and >= chunk_size free?};
-    T1_Check -- Yes --> T1_Success[Create Context via abo_new_context_fn];
+    B -- No --> T1_Start(Tier 1: Find ideal region);
+    T1_Start --> T1_Check{Find region with fewest contexts<br/>and ≥ chunk_size free?};
+    T1_Check -- Yes --> T1_Success[Call abo_new_context_fn];
     T1_Success --> Y[Return BIAS_ACTION_CREATE_NEW_CONTEXT];
 
-    T1_Check -- No --> T2_Start(Tier 2: Find Sharable Reservation);
-    T2_Start --> T2_Check{Find context to split?};
-    T2_Check -- Yes --> T2_Success[Split Donor & Create Context];
+    T1_Check -- No --> T2_Start(Tier 2: Find sharable reservation);
+    T2_Start --> T2_Check{Find active context with splittable space?};
+    T2_Check -- Yes --> T2_Success[Split reservation & create context];
     T2_Success --> Y;
     
     T2_Check -- No --> T3_Start(Tier 3: Fallback);
@@ -254,32 +254,41 @@ graph TD
 Hot path for active streams.
 
 ```mermaid
+
 graph TD
-    A[Start: Active Context Found] --> B{Chunk Consumed?};
-    B -- Yes --> C{Attempt Chunk Chaining};
+    A[Start: Active context found] --> B{Current chunk exhausted?};
+    B -- Yes --> C{Can chain to new chunk?};
     
-    C -- No --> Invalidate_and_Restart[Invalidate Context & Restart from Alg. I];
-    C -- Yes --> Adjust_Context[Adjust Context for New Chunk];
-    Adjust_Context --> D[Get Hint via abo_get_hint_fn];
+    C -- No --> Invalidate_and_Restart[Invalidate context & restart from Alg. I];
+    C -- Yes --> Adjust_Context[Update context for new chunk];
+    Adjust_Context --> D[Get hint via abo_get_hint_fn];
 
     B -- No --> D;
 
-    D --> E[Check for Fragmentation];
-    E --> F[Skip-and-Continue if Needed];
-    F --> G[Check Conflict via abo_find_conflicting_context_fn];
-    G --> H[Get Alternative Hint if Needed];
-    H --> I[Attempt Allocation at Hint];
-    I --> J{Allocation Succeeded?};
+    D --> E[Check for fragmentation];
+    E --> F[Skip-and-continue if needed];
+    F --> G[Check conflict via abo_find_conflicting_context_fn];
+    G --> H[Get alternative hint if needed];
+    H --> I[Attempt allocation at hint];
+    I --> J{Allocation succeeded?};
     
-    J -- No --> Invalidate_and_Retry_Default[Invalidate & Retry w/ Default];
+    J -- No --> Invalidate_and_Retry_Default[Invalidate & use default allocator];
     
-    J -- Yes --> K{Was actual_offset == abh_offset?};
+    J -- Yes --> K{actual_offset == abh_offset?};
     
-    K -- Yes --> L[Advance via abo_advance_fn];
-    L --> M[Return DVA];
+    K -- Yes --> L[Call abo_advance_fn];
+    L --> M[Return allocated block];
 
-    K -- No --> Invalidate_and_Succeed[Invalidate Context];
-    Invalidate_and_Succeed --> M;
+    K -- No --> N{Is actual_offset within current chunk?};
+    
+    N -- Yes --> O[Advance cursor to actual_offset + allocated_size];
+    O --> M;
+
+    N -- No --> P[Invalidate context];
+    P --> Q{Was a block allocated?};
+    Q -- Yes --> M;
+    Q -- No --> Invalidate_and_Retry_Default;
+
 ```
 
 ##### Framework Class Diagram
@@ -290,19 +299,21 @@ classDiagram
     class vdev_t {
         +avl_tree_t vdev_alloc_bias_contexts
     }
+    
     class alloc_bias_ops_t {
         +const char* abo_name
         +size_t abo_private_ctx_size
-        +abo_filter_req_fn()
-        +abo_get_stream_id_fn()
-        +abo_advise_alloc_fn()
-        +abo_new_context_fn()
-        +abo_get_hint_fn()
-        +abo_advance_fn()
-        +abo_is_stale_fn()
-        +abo_find_conflicting_context_fn()
-        +abo_get_alternative_hint_fn()
+        +boolean_t abo_filter_req_fn(alloc_bias_req_t*)
+        +uint64_t abo_get_stream_id_fn(alloc_bias_req_t*)
+        +alloc_bias_action_t abo_advise_alloc_fn(alloc_bias_context_t**, alloc_bias_req_t*)
+        +void abo_new_context_fn(alloc_bias_context_t*, uint64_t, void*, uint64_t, uint64_t)
+        +int abo_get_hint_fn(alloc_bias_context_t*, alloc_bias_hint_t*)
+        +void abo_advance_fn(alloc_bias_context_t*, uint64_t)
+        +boolean_t abo_is_stale_fn(alloc_bias_context_t*, uint64_t)
+        +alloc_bias_context_t* abo_find_conflicting_context_fn(void*)
+        +void abo_get_alternative_hint_fn(alloc_bias_context_t*, alloc_bias_hint_t*)
     }
+    
     class alloc_bias_context_t {
         +avl_node_t abc_node
         +alloc_bias_ops_t* abc_ops
@@ -310,40 +321,31 @@ classDiagram
         +uint64_t abc_stream_id
         +char abc_private_data[]
     }
+    
     class alloc_bias_req_t {
-        +zio_t* abr_zio
+        +void* abr_io_req
         +uint64_t abr_size
-        +void* abr_hint_handle
+        +alloc_bias_hint_t* abr_hint_handle
     }
+    
     class alloc_bias_hint_t {
         +void* abh_region_handle
         +uint64_t abh_offset
         +uint64_t abh_flags
     }
+    
     class alloc_bias_action_t {
         <<enumeration>>
         BIAS_ACTION_FALLBACK
         BIAS_ACTION_ALLOC_FROM_HINT
         BIAS_ACTION_CREATE_NEW_CONTEXT
     }
-    class streaming_bias_private_t {
-        +stream_type_t sbp_stream_type
-        +metaslab_t* sbp_metaslab
-        +uint64_t sbp_segment_start
-        +uint64_t sbp_segment_end
-        +uint64_t sbp_cursor
-        +uint64_t sbp_chunk_size
-        +uint64_t sbp_last_used
-    }
 
-    vdev_t "1" -- "1" alloc_bias_context_t : contains AVL tree of
-    vdev_t "1" -- "0..*" metaslab_t : contains many
-    alloc_bias_context_t "0..*" -- "1" metaslab_t : points to via private data
-    alloc_bias_ops_t "1" -- "1" alloc_bias_context_t : operates on
+    vdev_t "1" -- "0..*" alloc_bias_context_t : contains
+    alloc_bias_ops_t "1" -- "1" alloc_bias_context_t : manages
     alloc_bias_ops_t "1" -- "1" alloc_bias_req_t : processes
     alloc_bias_ops_t "1" -- "1" alloc_bias_hint_t : produces
-    alloc_bias_ops_t "1" -- "1" alloc_bias_action_t : returns
-    alloc_bias_context_t "1" -- "1" streaming_bias_private_t : contains in abc_private_data
+    alloc_bias_context_t "1" -- "1" abc_private_data : embeds engine state
 ```
 
 ##### Data Structure Relationships
