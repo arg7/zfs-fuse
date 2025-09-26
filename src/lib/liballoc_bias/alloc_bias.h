@@ -1,10 +1,9 @@
 #ifndef _SYS_ALLOC_BIAS_H
 #define	_SYS_ALLOC_BIAS_H
 
-#include <sys/zio.h>
-#include <sys/vdev.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <sys/avl.h>
-#include <sys/txg.h>
 
 /*
  * =============================================================================
@@ -15,6 +14,8 @@
  * =============================================================================
  */
 
+ typedef uint64_t htime_t; // high resolution time
+
 // Forward declarations
 typedef struct alloc_bias_ops alloc_bias_ops_t;
 typedef struct alloc_bias_context alloc_bias_context_t;
@@ -23,9 +24,9 @@ typedef struct alloc_bias_context alloc_bias_context_t;
  * @brief The "Question" from the core allocator to the bias engine.
  */
 typedef struct alloc_bias_req {
-	zio_t            *abr_zio;
-	uint64_t          abr_size;
-	alloc_bias_hint_t *abr_hint_handle;
+	void              *abr_io_req;
+	uint64_t           abr_size;
+	alloc_bias_hint_t *abr_backend_hint;
 } alloc_bias_req_t;
 
 /**
@@ -69,7 +70,7 @@ typedef struct alloc_bias_ops {
 	 * @param[in] req The allocation request details.
 	 * @return B_TRUE if the request is eligible for biasing, B_FALSE otherwise.
 	 */
-	boolean_t (*abo_filter_req_fn)(
+	bool (*abo_filter_req_fn)(
 	    const alloc_bias_req_t *req);
 
 	/**
@@ -97,7 +98,7 @@ typedef struct alloc_bias_ops {
 	void (*abo_new_context_fn)(
 	    alloc_bias_context_t *abc,
 	    uint64_t stream_id,
-	    metaslab_t *ms,
+	    void    *abh_region_handle,
 	    uint64_t segment_start,
 	    uint64_t segment_size);
 
@@ -118,15 +119,14 @@ typedef struct alloc_bias_ops {
 	/**
 	 * Called by the framework's cleanup routine to check for stale contexts.
 	 */
-	boolean_t (*abo_is_stale_fn)(
+	bool (*abo_is_stale_fn)(
 	    alloc_bias_context_t *abc,
-	    hrtime_t now);
+	    htime_t now);
 
 	/**
 	 * Checks if a standard ZFS hint conflicts with this engine's reservations.
 	 */
 	alloc_bias_context_t *(*abo_find_conflicting_context_fn)(
-	    vdev_t *vd,
 	    const void *hint_handle);
 
 	/**

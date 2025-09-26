@@ -29,11 +29,11 @@ typedef struct alloc_bias_ops {
     boolean_t (*abo_filter_req_fn)(const alloc_bias_req_t *req);
     uint64_t (*abo_get_stream_id_fn)(const alloc_bias_req_t *req);
     alloc_bias_action_t (*abo_advise_alloc_fn)(alloc_bias_context_t **abc_p, const alloc_bias_req_t *req);
-    void (*abo_new_context_fn)(alloc_bias_context_t *abc, uint64_t stream_id, metaslab_t *ms, uint64_t segment_start, uint64_t segment_size);
+    void (*abo_new_context_fn)(alloc_bias_context_t *abc, uint64_t stream_id, void *abh_region_handle, uint64_t segment_start, uint64_t segment_size);
     int (*abo_get_hint_fn)(alloc_bias_context_t *abc, alloc_bias_hint_t *hint_out);
     void (*abo_advance_fn)(alloc_bias_context_t *abc, uint64_t allocated_size);
-    boolean_t (*abo_is_stale_fn)(alloc_bias_context_t *abc, hrtime_t now);
-    alloc_bias_context_t *(*abo_find_conflicting_context_fn)(vdev_t *vd, const void *hint_handle);
+    boolean_t (*abo_is_stale_fn)(alloc_bias_context_t *abc, htime_t now);
+    alloc_bias_context_t *(*abo_find_conflicting_context_fn)(const void *hint_handle);
     void (*abo_get_alternative_hint_fn)(alloc_bias_context_t *conflicting_abc, alloc_bias_hint_t *hint_out);
 } alloc_bias_ops_t;
 ```
@@ -56,9 +56,9 @@ Packages an allocation request for the engine.
 
 ```c
 typedef struct alloc_bias_req {
-    zio_t *abr_zio; // ZIO with request details
+    void *abr_io_req; // IO request details
     uint64_t abr_size; // Requested size
-    alloc_bias_hint_t *abr_hint_handle; // Incoming hint from ZFS
+    alloc_bias_hint_t *abr_hint_handle; // Incoming hint from backend
 ```
 
 ##### `alloc_bias_hint_t`
@@ -313,7 +313,6 @@ classDiagram
     class alloc_bias_req_t {
         +zio_t* abr_zio
         +uint64_t abr_size
-        +metaslab_class_t* abr_mc
         +void* abr_hint_handle
     }
     class alloc_bias_hint_t {
