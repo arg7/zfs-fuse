@@ -58,7 +58,7 @@ Packages an allocation request for the engine.
 typedef struct alloc_bias_req {
     void *abr_io_req; // IO request details
     uint64_t abr_size; // Requested size
-    alloc_bias_hint_t *abr_hint_handle; // Incoming hint from backend
+    alloc_bias_hint_t *abr_backend_hint; // Incoming hint from backend
 ```
 
 ##### `alloc_bias_hint_t`
@@ -110,8 +110,8 @@ avl_tree_t vdev_alloc_bias_contexts; // AVL tree of contexts
 
 #### 3. Framework Integration
 The Allocation Bias Framework integrates at the `vdev` level, hooking into `metaslab_alloc()` to dispatch requests to the active engine (selected via `allocation:strategy`). The public API includes:
-- `ab_register_engine(alloc_bias_ops_t *ops)`: Registers a new engine.
-- `ab_deregister_engine(alloc_bias_ops_t *ops)`: Deregisters an engine.
+- `int ab_register_engine(const char *name, alloc_bias_ops_t *ops)`: Registers a new engine.
+- `void ab_deregister_engine(const char *name)`: Deregisters an engine.
 - `ab_find_engine_by_name(const char *name)`: Finds an engine by name (e.g., “streaming”).
 
 #### 4. Configuration

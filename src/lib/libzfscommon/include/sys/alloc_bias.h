@@ -3,11 +3,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <sys/avl.h>
 
 /*
  * =============================================================================
- * ZFS Allocation Bias Framework
+ * Allocation Bias Framework
  *
  * This framework provides a mechanism to override the default ZFS metaslab
  * allocation strategy with custom, policy-driven "bias engines".
@@ -19,6 +18,7 @@
 // Forward declarations
 typedef struct alloc_bias_ops alloc_bias_ops_t;
 typedef struct alloc_bias_context alloc_bias_context_t;
+typedef struct alloc_bias_hint alloc_bias_hint_t;
 
 /**
  * @brief The "Question" from the core allocator to the bias engine.
@@ -35,7 +35,6 @@ typedef struct alloc_bias_req {
 typedef struct alloc_bias_hint {
 	void       *abh_region_handle; // Opaque handle to an allocation region (e.g., metaslab_t*).
 	uint64_t    abh_offset;
-	uint64_t    abh_flags;
 } alloc_bias_hint_t;
 
 /**
@@ -51,7 +50,6 @@ typedef enum alloc_bias_action {
  * @brief The stateful context object for a single biased stream.
  */
 typedef struct alloc_bias_context {
-	avl_node_t          abc_node;
 	alloc_bias_ops_t   *abc_ops;
 	uint64_t            abc_primary_key;
 	uint64_t            abc_stream_id;
@@ -145,8 +143,8 @@ typedef struct alloc_bias_ops {
  * =============================================================================
  */
 
-int ab_register_engine(alloc_bias_ops_t *ops);
-void ab_deregister_engine(alloc_bias_ops_t *ops);
+int ab_register_engine(const char *name, alloc_bias_ops_t *ops);
+void ab_deregister_engine(const char *name);
 alloc_bias_ops_t *ab_find_engine_by_name(const char *name);
 
 #endif /* _SYS_ALLOC_BIAS_H */
