@@ -53,6 +53,7 @@ typedef enum alloc_bias_action {
  * @brief The stateful context object for a single biased stream.
  */
 typedef struct alloc_bias_context {
+	avl_node_t          abc_node;
 	alloc_bias_ops_t   *abc_ops;
 	uint64_t            abc_primary_key;
 	uint64_t            abc_stream_id;
@@ -146,8 +147,8 @@ typedef struct alloc_bias_ops {
  * =============================================================================
  */
 
-int ab_register_engine(const char *name, alloc_bias_ops_t *ops);
-void ab_deregister_engine(const char *name);
+int ab_register_engine(alloc_bias_ops_t *ops);
+void ab_deregister_engine(alloc_bias_ops_t *ops);
 alloc_bias_ops_t *ab_find_engine_by_name(const char *name);
 
 void ab_vdev_init(struct vdev *vd);

@@ -1891,16 +1891,20 @@ top:
 			DVA_SET_ASIZE(&dva[d], asize);
 
 #ifdef ALLOC_DEBUG
-			{
-				hrtime_t now = gethrtime();
-				uint64_t actual_offset = DVA_GET_OFFSET(&dva[d]);
-				uint64_t hint_offset = (hintdva != NULL &&
-				    DVA_IS_VALID(&hintdva[d])) ?
-				    DVA_GET_OFFSET(&hintdva[d]) : (uint64_t)-1;
-				metaslab_t *log_msp = (selected_msp != NULL) ?
-				    selected_msp : msp;
-				uint64_t metaslab_index = (log_msp != NULL) ?
-				    (log_msp->ms_map.sm_start >> vd->vdev_ms_shift) : 0;
+		{
+			hrtime_t now = gethrtime();
+			uint64_t actual_offset = DVA_GET_OFFSET(&dva[d]);
+			uint64_t hint_offset = (hintdva != NULL &&
+			    DVA_IS_VALID(&hintdva[d])) ?
+			    DVA_GET_OFFSET(&hintdva[d]) : (uint64_t)-1;
+			metaslab_t *log_msp = selected_msp;
+			if (log_msp == NULL && actual_offset != -1ULL) {
+				uint64_t log_index = actual_offset >> vd->vdev_ms_shift;
+				if (log_index < vd->vdev_ms_count)
+					log_msp = vd->vdev_ms[log_index];
+			}
+			uint64_t metaslab_index = (log_msp != NULL) ?
+			    (log_msp->ms_map.sm_start >> vd->vdev_ms_shift) : 0;
 
 				printf("ALLOCDBG time=%llu vdev=%llu metaslab=%llu hint=0x%016" PRIx64
 				    " actual=0x%016" PRIx64 " obj_type=%u\n",
