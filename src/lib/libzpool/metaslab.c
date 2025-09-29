@@ -30,10 +30,10 @@
 #include <sys/metaslab_impl.h>
 #include <sys/vdev_impl.h>
 #include <sys/zio.h>
-#include <sys/alloc_bias_backend.h>
-
 #include <sys/dmu_objset.h>
 #include <time.h>
+#include <alloc_bias_backend.h>
+
 
 uint64_t metaslab_aliquot = 512ULL << 10;
 uint64_t metaslab_gang_bang = SPA_MAXBLOCKSIZE + 1;	/* force gang blocks */

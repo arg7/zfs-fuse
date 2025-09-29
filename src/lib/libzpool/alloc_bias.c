@@ -1,8 +1,8 @@
 #include <sys/zfs_context.h>
-#include <sys/alloc_bias.h>
-#include <sys/alloc_bias_backend.h>
 #include <sys/metaslab.h>
 #include <sys/vdev_impl.h>
+#include <alloc_bias.h>
+#include <alloc_bias_backend.h>
 
 typedef struct ab_engine_node {
 	avl_node_t		abn_node;

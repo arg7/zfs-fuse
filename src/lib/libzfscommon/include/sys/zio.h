@@ -33,7 +33,7 @@
 #include <sys/avl.h>
 #include <sys/fs/zfs.h>
 #include <sys/zio_impl.h>
-#include <sys/alloc_bias.h>
+#include <alloc_bias.h>
 
 #ifdef	__cplusplus
 extern "C" {

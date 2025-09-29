@@ -31,8 +31,8 @@
 #include <sys/txg.h>
 #include <sys/zio.h>
 #include <sys/avl.h>
-#include <sys/alloc_bias.h>
-#include <sys/alloc_bias_backend.h>
+#include <alloc_bias.h>
+#include <alloc_bias_backend.h>
 
 #ifdef	__cplusplus
 extern "C" {

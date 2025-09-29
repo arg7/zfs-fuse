@@ -29,12 +29,12 @@
 #include <sys/avl.h>
 #include <sys/dmu.h>
 #include <sys/metaslab.h>
-#include <sys/alloc_bias.h>
 #include <sys/nvpair.h>
 #include <sys/space_map.h>
 #include <sys/vdev.h>
 #include <sys/dkio.h>
 #include <sys/uberblock_impl.h>
+#include <alloc_bias.h>
 
 #ifdef	__cplusplus
 extern "C" {

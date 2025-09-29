@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/avl.h>
-#include <sys/alloc_bias_backend.h>
+#include <alloc_bias_backend.h>
 
 /*
  * =============================================================================
