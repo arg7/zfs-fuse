@@ -17,6 +17,8 @@
  typedef uint64_t htime_t; // high resolution time
 
 // Forward declarations
+struct vdev;
+struct alloc_bias_hint;
 typedef struct alloc_bias_ops alloc_bias_ops_t;
 typedef struct alloc_bias_context alloc_bias_context_t;
 
@@ -26,7 +28,8 @@ typedef struct alloc_bias_context alloc_bias_context_t;
 typedef struct alloc_bias_req {
 	void              *abr_io_req;
 	uint64_t           abr_size;
-	alloc_bias_hint_t *abr_backend_hint;
+	struct vdev       *abr_vdev;
+	struct alloc_bias_hint *abr_backend_hint;
 } alloc_bias_req_t;
 
 /**
@@ -148,5 +151,15 @@ typedef struct alloc_bias_ops {
 int ab_register_engine(alloc_bias_ops_t *ops);
 void ab_deregister_engine(alloc_bias_ops_t *ops);
 alloc_bias_ops_t *ab_find_engine_by_name(const char *name);
+
+void ab_vdev_init(struct vdev *vd);
+void ab_vdev_fini(struct vdev *vd);
+
+alloc_bias_context_t *ab_context_alloc(alloc_bias_ops_t *ops,
+    uint64_t primary_key, uint64_t stream_id);
+alloc_bias_context_t *ab_context_lookup(struct vdev *vd,
+    alloc_bias_ops_t *ops, uint64_t primary_key, uint64_t stream_id);
+void ab_context_insert(struct vdev *vd, alloc_bias_context_t *ctx);
+void ab_context_remove(struct vdev *vd, alloc_bias_context_t *ctx);
 
 #endif /* _SYS_ALLOC_BIAS_H */

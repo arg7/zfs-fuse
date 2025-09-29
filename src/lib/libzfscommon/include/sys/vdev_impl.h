@@ -29,6 +29,7 @@
 #include <sys/avl.h>
 #include <sys/dmu.h>
 #include <sys/metaslab.h>
+#include <sys/alloc_bias.h>
 #include <sys/nvpair.h>
 #include <sys/space_map.h>
 #include <sys/vdev.h>
@@ -188,6 +189,8 @@ struct vdev {
 	spa_aux_vdev_t	*vdev_aux;	/* for l2cache vdevs		*/
 	zio_t		*vdev_probe_zio; /* root of current probe	*/
 	vdev_aux_t	vdev_label_aux;	/* on-disk aux state		*/
+	kmutex_t	vdev_alloc_bias_lock;
+	avl_tree_t	vdev_alloc_bias_contexts;
 
 	/*
 	 * For DTrace to work in userland (libzpool) context, these fields must

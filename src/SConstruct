@@ -61,6 +61,7 @@ if not (('-DDEBUG' in env['CCFLAGS']) or
 	sys.exit(1)
 
 env['CPPPATH'] = []
+env.Append(CPPPATH = ['#lib/liballoc_bias'])
 
 f = os.popen('uname -m')
 arch = f.readline().strip()

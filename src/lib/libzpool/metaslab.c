@@ -1250,8 +1250,40 @@ metaslab_distance(metaslab_t *msp, dva_t *dva)
 }
 
 static uint64_t
+metaslab_alloc_from_hint(metaslab_t *msp, uint64_t offset, uint64_t size,
+    uint64_t txg, dmu_object_type_t obj_type)
+{
+	uint64_t result = -1ULL;
+	vdev_t *vd = msp->ms_group->mg_vd;
+
+	mutex_enter(&msp->ms_lock);
+
+	if (metaslab_activate(msp, METASLAB_WEIGHT_PRIMARY, size) != 0) {
+		mutex_exit(&msp->ms_lock);
+		return (result);
+	}
+
+	if (!space_map_contains(&msp->ms_map, offset, size)) {
+		mutex_exit(&msp->ms_lock);
+		return (result);
+	}
+
+	space_map_remove(&msp->ms_map, offset, size, obj_type);
+
+	if (msp->ms_allocmap[txg & TXG_MASK].sm_space == 0)
+		vdev_dirty(vd, VDD_METASLAB, msp, txg);
+
+	space_map_add(&msp->ms_allocmap[txg & TXG_MASK], offset, size, obj_type);
+
+	mutex_exit(&msp->ms_lock);
+
+	return (offset);
+}
+
+static uint64_t
 metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
-    uint64_t min_distance, dva_t *dva, int d, dmu_object_type_t obj_type)
+    uint64_t min_distance, dva_t *dva, int d, dmu_object_type_t obj_type,
+    metaslab_t **selected_msp)
 {
 	metaslab_t *msp = NULL;
 	uint64_t offset = -1ULL;
@@ -1339,6 +1371,9 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
 
 	mutex_exit(&msp->ms_lock);
 
+	if (selected_msp != NULL)
+		*selected_msp = msp;
+
 	return (offset);
 }
 
@@ -1347,7 +1382,8 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
  */
 static int
 metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags, dmu_object_type_t obj_type)
+    dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags,
+    dmu_object_type_t obj_type, zio_t *zio)
 {
 	metaslab_group_t *mg, *rotor;
 	vdev_t *vd;
@@ -1358,6 +1394,8 @@ metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	uint64_t offset = -1ULL;
 	uint64_t asize;
 	uint64_t distance;
+	alloc_bias_ops_t *bias_ops = (zio != NULL) ? zio->io_alloc_bias_ops : NULL;
+	uint64_t bias_key = (zio != NULL) ? zio->io_alloc_bias_key : 0;
 
 	ASSERT(!DVA_IS_VALID(&dva[d]));
 
@@ -1462,7 +1500,126 @@ top:
 		asize = vdev_psize_to_asize(vd, psize);
 		ASSERT(P2PHASE(asize, 1ULL << vd->vdev_ashift) == 0);
 
-		offset = metaslab_group_alloc(mg, asize, txg, distance, dva, d, obj_type);
+		boolean_t create_ctx = B_FALSE;
+		alloc_bias_context_t *bias_ctx = NULL;
+		boolean_t bias_hint_valid = B_FALSE;
+		alloc_bias_hint_t bias_hint;
+		uint64_t bias_stream_id = 0;
+
+		if (bias_ops != NULL && bias_key != 0) {
+			alloc_bias_req_t req = { 0 };
+			boolean_t eligible = B_TRUE;
+
+			req.abr_io_req = zio;
+			req.abr_size = asize;
+			req.abr_vdev = vd;
+			req.abr_backend_hint = NULL;
+
+			if (bias_ops->abo_filter_req_fn != NULL)
+				eligible = bias_ops->abo_filter_req_fn(&req);
+
+			if (eligible) {
+				if (bias_ops->abo_get_stream_id_fn != NULL)
+					bias_stream_id = bias_ops->abo_get_stream_id_fn(&req);
+
+				mutex_enter(&vd->vdev_alloc_bias_lock);
+				bias_ctx = ab_context_lookup(vd, bias_ops, bias_key, bias_stream_id);
+
+				alloc_bias_context_t *ctx_ptr = bias_ctx;
+				alloc_bias_action_t action = BIAS_ACTION_FALLBACK;
+
+				if (bias_ops->abo_advise_alloc_fn != NULL)
+					action = bias_ops->abo_advise_alloc_fn(&ctx_ptr, &req);
+
+				if (ctx_ptr == NULL && bias_ctx != NULL) {
+					ab_context_remove(vd, bias_ctx);
+					bias_ctx = NULL;
+					action = BIAS_ACTION_FALLBACK;
+				} else {
+					bias_ctx = ctx_ptr;
+				}
+
+				if (action == BIAS_ACTION_ALLOC_FROM_HINT && bias_ctx != NULL &&
+				    bias_ops->abo_get_hint_fn != NULL) {
+					if (bias_ops->abo_get_hint_fn(bias_ctx, &bias_hint) == 0) {
+						bias_hint_valid = B_TRUE;
+					} else {
+						action = BIAS_ACTION_FALLBACK;
+					}
+				} else if (action == BIAS_ACTION_CREATE_NEW_CONTEXT &&
+				    bias_ctx == NULL) {
+					create_ctx = B_TRUE;
+				}
+
+				mutex_exit(&vd->vdev_alloc_bias_lock);
+
+				if (bias_hint_valid) {
+					metaslab_t *hint_msp = bias_hint.abh_region_handle;
+					if (hint_msp != NULL && hint_msp->ms_group->mg_vd == vd) {
+						uint64_t hint_result = metaslab_alloc_from_hint(hint_msp,
+						    bias_hint.abh_offset, asize, txg, obj_type);
+						if (hint_result != -1ULL) {
+							mc->mc_rotor = hint_msp->ms_group->mg_next;
+							mc->mc_aliquot = 0;
+							DVA_SET_VDEV(&dva[d], vd->vdev_id);
+							DVA_SET_OFFSET(&dva[d], hint_result);
+							DVA_SET_GANG(&dva[d], !!(flags & METASLAB_GANG_HEADER));
+							DVA_SET_ASIZE(&dva[d], asize);
+
+							if (bias_ops->abo_advance_fn != NULL) {
+								mutex_enter(&vd->vdev_alloc_bias_lock);
+								if (bias_ctx != NULL)
+									bias_ops->abo_advance_fn(bias_ctx, asize);
+								mutex_exit(&vd->vdev_alloc_bias_lock);
+							}
+
+							return (0);
+						}
+					}
+
+					if (bias_ops->abo_get_alternative_hint_fn != NULL &&
+					    bias_ctx != NULL) {
+						mutex_enter(&vd->vdev_alloc_bias_lock);
+						bias_ops->abo_get_alternative_hint_fn(bias_ctx, &bias_hint);
+						mutex_exit(&vd->vdev_alloc_bias_lock);
+
+						metaslab_t *alt_msp = bias_hint.abh_region_handle;
+						if (alt_msp != NULL && alt_msp->ms_group->mg_vd == vd) {
+							uint64_t alt_result = metaslab_alloc_from_hint(alt_msp,
+							    bias_hint.abh_offset, asize, txg, obj_type);
+							if (alt_result != -1ULL) {
+								mc->mc_rotor = alt_msp->ms_group->mg_next;
+								mc->mc_aliquot = 0;
+								DVA_SET_VDEV(&dva[d], vd->vdev_id);
+								DVA_SET_OFFSET(&dva[d], alt_result);
+								DVA_SET_GANG(&dva[d], !!(flags & METASLAB_GANG_HEADER));
+								DVA_SET_ASIZE(&dva[d], asize);
+
+								if (bias_ops->abo_advance_fn != NULL) {
+									mutex_enter(&vd->vdev_alloc_bias_lock);
+									if (bias_ctx != NULL)
+										bias_ops->abo_advance_fn(bias_ctx, asize);
+									mutex_exit(&vd->vdev_alloc_bias_lock);
+								}
+
+								return (0);
+							}
+						}
+					}
+
+					if (bias_ctx != NULL) {
+						mutex_enter(&vd->vdev_alloc_bias_lock);
+						ab_context_remove(vd, bias_ctx);
+						mutex_exit(&vd->vdev_alloc_bias_lock);
+						bias_ctx = NULL;
+					}
+				}
+			}
+		}
+
+		metaslab_t *selected_msp = NULL;
+		offset = metaslab_group_alloc(mg, asize, txg, distance, dva, d,
+		    obj_type, &selected_msp);
 		if (offset != -1ULL) {
 			/*
 			 * If we've just selected this metaslab group,
@@ -1498,6 +1655,21 @@ top:
 			DVA_SET_OFFSET(&dva[d], offset);
 			DVA_SET_GANG(&dva[d], !!(flags & METASLAB_GANG_HEADER));
 			DVA_SET_ASIZE(&dva[d], asize);
+
+			if (bias_ops != NULL && create_ctx && bias_key != 0 &&
+			    selected_msp != NULL) {
+				alloc_bias_context_t *new_ctx =
+				    ab_context_alloc(bias_ops, bias_key, bias_stream_id);
+				mutex_enter(&vd->vdev_alloc_bias_lock);
+				ab_context_insert(vd, new_ctx);
+				if (bias_ops->abo_new_context_fn != NULL) {
+					bias_ops->abo_new_context_fn(new_ctx, bias_stream_id,
+					    selected_msp, offset, asize);
+				}
+				if (bias_ops->abo_advance_fn != NULL)
+					bias_ops->abo_advance_fn(new_ctx, asize);
+				mutex_exit(&vd->vdev_alloc_bias_lock);
+			}
 
 			return (0);
 		}
@@ -1624,7 +1796,8 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva, uint64_t txg)
 
 int
 metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
-    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags, dmu_object_type_t obj_type)
+    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags,
+    dmu_object_type_t obj_type, zio_t *zio)
 {
 	dva_t *dva = bp->blk_dva;
 	dva_t *hintdva = hintbp->blk_dva;
@@ -1646,7 +1819,7 @@ metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
 
 	for (int d = 0; d < ndvas; d++) {
 		error = metaslab_alloc_dva(spa, mc, psize, dva, d, hintdva,
-		    txg, flags, obj_type);
+		    txg, flags, obj_type, zio);
 		if (error) {
 			for (d--; d >= 0; d--) {
 				metaslab_free_dva(spa, &dva[d], txg, B_TRUE);

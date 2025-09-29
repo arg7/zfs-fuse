@@ -8,7 +8,7 @@ objects = Split('compress.c list.c zfs_comutil.c zfs_deleg.c zfs_namecheck.c zfs
 objects_user = ['build-user/' + o for o in objects]
 objects_kernel = ['build-kernel/' + o for o in objects]
 
-cpppath_common = Split('./include #lib/libavl/include #lib/libnvpair/include #lib/libumem/include')
+cpppath_common = Split('./include #lib/libavl/include #lib/libnvpair/include #lib/libumem/include #lib/liballoc_bias')
 cpppath_user = cpppath_common + Split('#lib/libzpool/include #lib/libsolcompat/include')
 cpppath_kernel = cpppath_common + ['#lib/libsolkerncompat/include']
 
