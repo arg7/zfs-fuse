@@ -33,6 +33,7 @@
 #include <sys/avl.h>
 #include <sys/fs/zfs.h>
 #include <sys/zio_impl.h>
+#include <sys/alloc_bias.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -353,6 +354,9 @@ struct zio {
 	/* Core information about this I/O */
 	zbookmark_t	io_bookmark;
 	zio_prop_t	io_prop;
+	/* Allocation bias metadata */
+	alloc_bias_ops_t	*io_alloc_bias_ops;
+	uint64_t		io_alloc_bias_key;
 	zio_type_t	io_type;
 	enum zio_child	io_child_type;
 	int		io_cmd;
