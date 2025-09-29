@@ -1890,6 +1890,29 @@ top:
 			DVA_SET_GANG(&dva[d], !!(flags & METASLAB_GANG_HEADER));
 			DVA_SET_ASIZE(&dva[d], asize);
 
+#ifdef ALLOC_DEBUG
+			{
+				hrtime_t now = gethrtime();
+				uint64_t actual_offset = DVA_GET_OFFSET(&dva[d]);
+				uint64_t hint_offset = (hintdva != NULL &&
+				    DVA_IS_VALID(&hintdva[d])) ?
+				    DVA_GET_OFFSET(&hintdva[d]) : (uint64_t)-1;
+				metaslab_t *log_msp = (selected_msp != NULL) ?
+				    selected_msp : msp;
+				uint64_t metaslab_index = (log_msp != NULL) ?
+				    (log_msp->ms_map.sm_start >> vd->vdev_ms_shift) : 0;
+
+				printf("ALLOCDBG time=%llu vdev=%llu metaslab=%llu hint=0x%016" PRIx64
+				    " actual=0x%016" PRIx64 " obj_type=%u\n",
+				    (unsigned long long)now,
+				    (unsigned long long)vd->vdev_id,
+				    (unsigned long long)metaslab_index,
+				    (unsigned long long)hint_offset,
+				    (unsigned long long)actual_offset,
+				    (unsigned int)obj_type);
+			}
+#endif
+
 			if (bias_ops != NULL && create_ctx && bias_key != 0 &&
 			    selected_msp != NULL) {
 				alloc_bias_context_t *new_ctx =
