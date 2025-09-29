@@ -30,6 +30,7 @@
 #include <sys/metaslab_impl.h>
 #include <sys/vdev_impl.h>
 #include <sys/zio.h>
+#include <sys/alloc_bias_backend.h>
 
 #include <sys/dmu_objset.h>
 #include <time.h>
@@ -1249,6 +1250,38 @@ metaslab_distance(metaslab_t *msp, dva_t *dva)
 	return (0);
 }
 
+struct vab_iter {
+	metaslab_t	*vi_msp;
+	size_t		vi_count;
+	size_t		vi_index;
+	vab_free_segment_t vi_segments[];
+};
+
+static int
+metaslab_load_space_map_locked(metaslab_t *msp)
+{
+	space_map_t *sm = &msp->ms_map;
+	metaslab_group_t *mg = msp->ms_group;
+	space_map_ops_t *ops = mg->mg_class->mc_ops;
+	spa_t *spa = mg->mg_vd->vdev_spa;
+
+	ASSERT(MUTEX_HELD(&msp->ms_lock));
+
+	space_map_load_wait(sm);
+	if (sm->sm_loaded)
+		return (0);
+
+	int error = space_map_load(sm, ops, SM_FREE, &msp->ms_smo,
+	    spa_meta_objset(spa));
+	if (error != 0)
+		return (error);
+
+	for (int t = 0; t < TXG_DEFER_SIZE; t++)
+		space_map_walk(&msp->ms_defermap[t], space_map_claim, sm);
+
+	return (0);
+}
+
 static uint64_t
 metaslab_alloc_from_hint(metaslab_t *msp, uint64_t offset, uint64_t size,
     uint64_t txg, dmu_object_type_t obj_type)
@@ -1278,6 +1311,207 @@ metaslab_alloc_from_hint(metaslab_t *msp, uint64_t offset, uint64_t size,
 	mutex_exit(&msp->ms_lock);
 
 	return (offset);
+}
+
+static void
+metaslab_sort_segments_by_size(vab_free_segment_t *segments, size_t count)
+{
+	for (size_t i = 1; i < count; i++) {
+		vab_free_segment_t tmp = segments[i];
+		size_t j = i;
+		while (j > 0 && segments[j - 1].vfs_size < tmp.vfs_size) {
+			segments[j] = segments[j - 1];
+			j--;
+		}
+		segments[j] = tmp;
+	}
+}
+
+static void *
+metaslab_backend_first_region(vdev_t *vd)
+{
+	for (uint64_t i = 0; i < vd->vdev_ms_count; i++) {
+		if (vd->vdev_ms[i] != NULL)
+			return (vd->vdev_ms[i]);
+	}
+	return (NULL);
+}
+
+static void *
+metaslab_backend_next_region(void *region_handle)
+{
+	metaslab_t *msp = region_handle;
+	vdev_t *vd = msp->ms_group->mg_vd;
+	uint64_t shift = vd->vdev_ms_shift;
+	uint64_t start = msp->ms_map.sm_start;
+	uint64_t idx = start >> shift;
+
+	for (uint64_t i = idx + 1; i < vd->vdev_ms_count; i++) {
+		if (vd->vdev_ms[i] != NULL)
+			return (vd->vdev_ms[i]);
+	}
+
+	return (NULL);
+}
+
+static int
+metaslab_backend_get_region_stats(void *region_handle,
+    vab_region_stats_t *stats_out)
+{
+	metaslab_t *msp = region_handle;
+
+	if (msp == NULL || stats_out == NULL)
+		return (EINVAL);
+
+	bzero(stats_out, sizeof (*stats_out));
+
+	mutex_enter(&msp->ms_lock);
+	stats_out->vrs_start = msp->ms_map.sm_start;
+	stats_out->vrs_size = msp->ms_map.sm_size;
+	stats_out->vrs_allocated = msp->ms_smo.smo_alloc;
+	stats_out->vrs_loaded = msp->ms_map.sm_loaded;
+	stats_out->vrs_active =
+	    (msp->ms_weight & METASLAB_ACTIVE_MASK) != 0;
+
+	if (msp->ms_map.sm_loaded) {
+		stats_out->vrs_free_space = msp->ms_map.sm_space;
+		stats_out->vrs_max_segment =
+		    space_map_maxsize(&msp->ms_map);
+	} else {
+		uint64_t free_estimate = stats_out->vrs_size -
+		    stats_out->vrs_allocated;
+		stats_out->vrs_free_space = free_estimate;
+		stats_out->vrs_max_segment = free_estimate;
+	}
+	mutex_exit(&msp->ms_lock);
+
+	return (0);
+}
+
+static int
+metaslab_backend_alloc(void *region_handle, uint64_t offset, uint64_t size,
+    dmu_object_type_t obj_type, uint64_t txg)
+{
+	if (region_handle == NULL || size == 0)
+		return (EINVAL);
+
+	uint64_t result = metaslab_alloc_from_hint(region_handle, offset,
+	    size, txg, obj_type);
+
+	return (result == -1ULL ? ENOSPC : 0);
+}
+
+static boolean_t
+metaslab_backend_is_free(void *region_handle, uint64_t offset, uint64_t size)
+{
+	metaslab_t *msp = region_handle;
+	boolean_t result = B_FALSE;
+
+	if (msp == NULL || size == 0)
+		return (B_FALSE);
+
+	mutex_enter(&msp->ms_lock);
+	if (metaslab_load_space_map_locked(msp) == 0)
+		result = space_map_contains(&msp->ms_map, offset, size);
+	mutex_exit(&msp->ms_lock);
+
+	return (result);
+}
+
+static int
+metaslab_backend_iter_create(void *region_handle, vab_iter_order_t order,
+    uint64_t min_size, vab_iter_t **iter_out)
+{
+	metaslab_t *msp = region_handle;
+	vab_iter_t *iter;
+	size_t count = 0;
+	space_seg_t *ss;
+
+	if (msp == NULL || iter_out == NULL)
+		return (EINVAL);
+
+	mutex_enter(&msp->ms_lock);
+	int error = metaslab_load_space_map_locked(msp);
+	if (error != 0) {
+		mutex_exit(&msp->ms_lock);
+		return (error);
+	}
+
+	for (ss = avl_first(&msp->ms_map.sm_root);
+	    ss != NULL; ss = AVL_NEXT(&msp->ms_map.sm_root, ss)) {
+		uint64_t seg_size = ss->ss_end - ss->ss_start;
+		if (seg_size >= min_size)
+			count++;
+	}
+
+	size_t alloc_size = sizeof (vab_iter_t) +
+	    (count * sizeof (vab_free_segment_t));
+	iter = kmem_zalloc(alloc_size, KM_SLEEP);
+	iter->vi_msp = msp;
+	iter->vi_count = count;
+	iter->vi_index = 0;
+
+	if (count != 0) {
+		size_t idx = 0;
+		for (ss = avl_first(&msp->ms_map.sm_root);
+		    ss != NULL; ss = AVL_NEXT(&msp->ms_map.sm_root, ss)) {
+			uint64_t seg_size = ss->ss_end - ss->ss_start;
+			if (seg_size < min_size)
+				continue;
+			iter->vi_segments[idx].vfs_offset = ss->ss_start;
+			iter->vi_segments[idx].vfs_size = seg_size;
+			idx++;
+		}
+
+		if (order == VAB_ITER_ORDER_SIZE)
+			metaslab_sort_segments_by_size(iter->vi_segments, iter->vi_count);
+	}
+
+	mutex_exit(&msp->ms_lock);
+
+	*iter_out = iter;
+	return (0);
+}
+
+static bool
+metaslab_backend_iter_next(vab_iter_t *iter, vab_free_segment_t *segment_out)
+{
+	if (iter == NULL || segment_out == NULL)
+		return (false);
+
+	if (iter->vi_index >= iter->vi_count)
+		return (false);
+
+	*segment_out = iter->vi_segments[iter->vi_index++];
+	return (true);
+}
+
+static void
+metaslab_backend_iter_destroy(vab_iter_t *iter)
+{
+	if (iter == NULL)
+		return;
+
+	size_t alloc_size = sizeof (vab_iter_t) +
+	    (iter->vi_count * sizeof (vab_free_segment_t));
+	kmem_free(iter, alloc_size);
+}
+
+static const vdev_alloc_backend_ops_t metaslab_alloc_backend_ops_impl = {
+	.vab_first_region = metaslab_backend_first_region,
+	.vab_next_region = metaslab_backend_next_region,
+	.vab_get_region_stats = metaslab_backend_get_region_stats,
+	.vab_alloc = metaslab_backend_alloc,
+	.vab_is_free = metaslab_backend_is_free,
+	.vab_iter_create = metaslab_backend_iter_create,
+	.vab_iter_next = metaslab_backend_iter_next,
+	.vab_iter_destroy = metaslab_backend_iter_destroy,
+};
+
+const vdev_alloc_backend_ops_t *
+metaslab_get_alloc_backend_ops(void)
+{
+	return (&metaslab_alloc_backend_ops_impl);
 }
 
 static uint64_t

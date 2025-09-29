@@ -1,5 +1,7 @@
 #include <sys/zfs_context.h>
 #include <sys/alloc_bias.h>
+#include <sys/alloc_bias_backend.h>
+#include <sys/metaslab.h>
 #include <sys/vdev_impl.h>
 
 typedef struct ab_engine_node {
@@ -215,4 +217,10 @@ ab_context_remove(vdev_t *vd, alloc_bias_context_t *ctx)
 	ASSERT(MUTEX_HELD(&vd->vdev_alloc_bias_lock));
 	avl_remove(&vd->vdev_alloc_bias_contexts, ctx);
 	kmem_free(ctx, sizeof (*ctx) + ctx->abc_ops->abo_private_ctx_size);
+}
+
+const vdev_alloc_backend_ops_t *
+ab_get_backend_ops(void)
+{
+	return (metaslab_get_alloc_backend_ops());
 }

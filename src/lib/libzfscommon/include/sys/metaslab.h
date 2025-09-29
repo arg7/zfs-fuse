@@ -32,6 +32,7 @@
 #include <sys/zio.h>
 #include <sys/avl.h>
 #include <sys/alloc_bias.h>
+#include <sys/alloc_bias_backend.h>
 
 #ifdef	__cplusplus
 extern "C" {
@@ -56,6 +57,8 @@ extern int metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 extern void metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg,
     boolean_t now);
 extern int metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg);
+
+extern const vdev_alloc_backend_ops_t *metaslab_get_alloc_backend_ops(void);
 
 extern metaslab_class_t *metaslab_class_create(spa_t *spa,
     space_map_ops_t *ops);

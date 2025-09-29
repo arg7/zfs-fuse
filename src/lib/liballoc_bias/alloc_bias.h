@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/avl.h>
+#include <sys/alloc_bias_backend.h>
 
 /*
  * =============================================================================
@@ -161,5 +162,7 @@ alloc_bias_context_t *ab_context_lookup(struct vdev *vd,
     alloc_bias_ops_t *ops, uint64_t primary_key, uint64_t stream_id);
 void ab_context_insert(struct vdev *vd, alloc_bias_context_t *ctx);
 void ab_context_remove(struct vdev *vd, alloc_bias_context_t *ctx);
+
+const vdev_alloc_backend_ops_t *ab_get_backend_ops(void);
 
 #endif /* _SYS_ALLOC_BIAS_H */
