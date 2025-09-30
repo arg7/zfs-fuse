@@ -191,6 +191,9 @@ struct spa {
 	kmutex_t	spa_vdev_top_lock;	/* dueling offline/remove */
 	boolean_t	spa_autoreplace;	/* autoreplace set in open */
 	int		spa_vdev_locks;		/* locks grabbed */
+#ifdef ALLOC_DEBUG
+	boolean_t	spa_alloc_debug_dumped; /* emitted pool layout under ALLOC_DEBUG */
+#endif
 
 	/*
 	 * spa_refcnt & spa_config_lock must be the last elements

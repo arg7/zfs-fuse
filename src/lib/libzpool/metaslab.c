@@ -34,6 +34,7 @@
 
 #include <sys/dmu_objset.h>
 #include <time.h>
+#include <inttypes.h>
 
 uint64_t metaslab_aliquot = 512ULL << 10;
 uint64_t metaslab_gang_bang = SPA_MAXBLOCKSIZE + 1;	/* force gang blocks */
@@ -1906,13 +1907,14 @@ top:
 			uint64_t metaslab_index = (log_msp != NULL) ?
 			    (log_msp->ms_map.sm_start >> vd->vdev_ms_shift) : 0;
 
-				printf("ALLOCDBG time=%llu vdev=%llu metaslab=%llu hint=0x%016" PRIx64
+				printf("ALLOCDBG time=%" PRIu64 " vdev=%" PRIu64
+				    " metaslab=%" PRIu64 " hint=0x%016" PRIx64
 				    " actual=0x%016" PRIx64 " obj_type=%u\n",
-				    (unsigned long long)now,
-				    (unsigned long long)vd->vdev_id,
-				    (unsigned long long)metaslab_index,
-				    (unsigned long long)hint_offset,
-				    (unsigned long long)actual_offset,
+				    (uint64_t)now,
+				    vd->vdev_id,
+				    metaslab_index,
+				    hint_offset,
+				    actual_offset,
 				    (unsigned int)obj_type);
 			}
 #endif

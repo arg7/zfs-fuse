@@ -31,6 +31,7 @@
  */
 
 #include <sys/zfs_context.h>
+#include <inttypes.h>
 #include <sys/fm/fs/zfs.h>
 #include <sys/spa_impl.h>
 #include <sys/zio.h>
@@ -68,6 +69,105 @@
 
 #include "zfs_prop.h"
 #include "zfs_comutil.h"
+
+#ifdef ALLOC_DEBUG
+static void
+spa_alloc_debug_dump_metaslab(metaslab_t *msp)
+{
+	uint64_t offset, size, sm_object, allocated, free_space, index = 0;
+	char freebuf[32];
+
+	if (msp == NULL)
+		return;
+
+	mutex_enter(&msp->ms_lock);
+	offset = msp->ms_map.sm_start;
+	size = msp->ms_map.sm_size;
+	sm_object = msp->ms_smo.smo_object;
+	allocated = msp->ms_smo.smo_alloc;
+	mutex_exit(&msp->ms_lock);
+
+	if (size == 0)
+		return;
+
+	index = offset / size;
+	free_space = (size > allocated) ? (size - allocated) : 0;
+	nicenum(free_space, freebuf);
+
+	cmn_err(CE_NOTE,
+	    "!ALLOC_DEBUG:     metaslab %6" PRIu64
+	    " offset 0x%012" PRIx64 " spacemap %6" PRIu64
+	    " free %s (%" PRIu64 ")",
+	    index,
+	    offset,
+	    sm_object,
+	    freebuf,
+	    free_space);
+}
+
+static void
+spa_alloc_debug_dump_vdev(vdev_t *vd)
+{
+	vdev_stat_t vs;
+	char sizebuf[32], allocbuf[32], freebuf[32];
+	uint64_t free_space;
+	const char *path;
+
+	if (vd == NULL)
+		return;
+
+	vdev_get_stats(vd, &vs);
+	path = (vd->vdev_path != NULL) ? vd->vdev_path : "-";
+
+	nicenum(vs.vs_space, sizebuf);
+	nicenum(vs.vs_alloc, allocbuf);
+	free_space = (vs.vs_space > vs.vs_alloc) ?
+	    (vs.vs_space - vs.vs_alloc) : 0;
+	nicenum(free_space, freebuf);
+
+	cmn_err(CE_NOTE,
+	    "!ALLOC_DEBUG:   vdev %3" PRIu64 " guid=%" PRIu64
+	    " type=%s path=%s metaslabs=%" PRIu64
+	    " ashift=%" PRIu64 " size=%s alloc=%s free=%s (%" PRIu64 ")",
+	    vd->vdev_id,
+	    vd->vdev_guid,
+	    vd->vdev_ops->vdev_op_type,
+	    path,
+	    vd->vdev_ms_count,
+	    vd->vdev_ashift,
+	    sizebuf,
+	    allocbuf,
+	    freebuf,
+	    free_space);
+
+	for (uint64_t m = 0; m < vd->vdev_ms_count; m++)
+		spa_alloc_debug_dump_metaslab(vd->vdev_ms[m]);
+}
+
+static void
+spa_alloc_debug_dump_pool(spa_t *spa)
+{
+	vdev_t *rvd;
+
+	if (spa->spa_alloc_debug_dumped || spa->spa_root_vdev == NULL)
+		return;
+
+	spa->spa_alloc_debug_dumped = B_TRUE;
+	rvd = spa->spa_root_vdev;
+
+	spa_config_enter(spa, SCL_CONFIG, FTAG, RW_READER);
+	cmn_err(CE_NOTE, "!ALLOC_DEBUG: pool '%s' metaslab layout", spa_name(spa));
+
+	if (rvd != NULL) {
+		for (uint64_t c = 0; c < rvd->vdev_children; c++) {
+			vdev_t *vd = rvd->vdev_child[c];
+			spa_alloc_debug_dump_vdev(vd);
+		}
+	}
+
+	spa_config_exit(spa, SCL_CONFIG, FTAG);
+}
+#endif /* ALLOC_DEBUG */
 
 enum zti_modes {
 	zti_mode_fixed,			/* value is # of threads (min 1) */
@@ -2136,6 +2236,10 @@ spa_open_common(const char *pool, spa_t **spapp, void *tag, nvlist_t *nvpolicy,
 	}
 
 	spa_open_ref(spa, tag);
+
+#ifdef ALLOC_DEBUG
+	spa_alloc_debug_dump_pool(spa);
+#endif
 
 
 	if (config != NULL)
