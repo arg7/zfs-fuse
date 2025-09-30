@@ -25,26 +25,40 @@
 #include <sys/zfs_context.h>
 #include <sys/zio.h>
 #include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/opensslv.h>
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+#define EVP_MD_CTX_new	EVP_MD_CTX_create
+#define EVP_MD_CTX_free	EVP_MD_CTX_destroy
+#endif
 
 void
 zio_checksum_SHA256(const void *buf, uint64_t size, zio_cksum_t *zcp)
 {
-	SHA256_CTX ctx;
-	zio_cksum_t tmp;
+    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    unsigned int digest_len = 0;
+    zio_cksum_t tmp;
 
-	SHA256_Init(&ctx);
-	SHA256_Update(&ctx, buf, size);
-	SHA256_Final((unsigned char*)&tmp, &ctx);
+    VERIFY(mdctx != NULL);
+    VERIFY3S(EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL), ==, 1);
+    VERIFY3S(EVP_DigestUpdate(mdctx, buf, size), ==, 1);
+    VERIFY3S(EVP_DigestFinal_ex(mdctx, digest, &digest_len), ==, 1);
+    EVP_MD_CTX_free(mdctx);
 
-	/*
-	 * A prior implementation of this function had a
-	 * private SHA256 implementation always wrote things out in
-	 * Big Endian and there wasn't a byteswap variant of it.
-	 * To preseve on disk compatibility we need to force that
-	 * behaviour.
-	 */
-	zcp->zc_word[0] = BE_64(tmp.zc_word[0]);
-	zcp->zc_word[1] = BE_64(tmp.zc_word[1]);
-	zcp->zc_word[2] = BE_64(tmp.zc_word[2]);
-	zcp->zc_word[3] = BE_64(tmp.zc_word[3]);
+    ASSERT3U(digest_len, ==, SHA256_DIGEST_LENGTH);
+    bcopy(digest, &tmp, sizeof (tmp));
+
+    /*
+     * A prior implementation of this function had a
+     * private SHA256 implementation always wrote things out in
+     * Big Endian and there wasn't a byteswap variant of it.
+     * To preseve on disk compatibility we need to force that
+     * behaviour.
+     */
+    zcp->zc_word[0] = BE_64(tmp.zc_word[0]);
+    zcp->zc_word[1] = BE_64(tmp.zc_word[1]);
+    zcp->zc_word[2] = BE_64(tmp.zc_word[2]);
+    zcp->zc_word[3] = BE_64(tmp.zc_word[3]);
 }

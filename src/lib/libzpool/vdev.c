@@ -334,6 +334,7 @@ vdev_alloc_common(spa_t *spa, uint_t id, uint64_t guid, vdev_ops_t *ops)
 	vd->vdev_stat.vs_timestamp = gethrtime();
 	vdev_queue_init(vd);
 	vdev_cache_init(vd);
+	ab_vdev_init(vd);
 
 	return (vd);
 }
@@ -608,6 +609,7 @@ vdev_free(vdev_t *vd)
 	 */
 	vdev_queue_fini(vd);
 	vdev_cache_fini(vd);
+	ab_vdev_fini(vd);
 
 	if (vd->vdev_path)
 		spa_strfree(vd->vdev_path);

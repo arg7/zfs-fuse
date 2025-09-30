@@ -1676,7 +1676,8 @@ zio_write_gang_block(zio_t *pio)
 
 	error = metaslab_alloc(spa, spa_normal_class(spa), SPA_GANGBLOCKSIZE,
 	    bp, gbh_copies, txg, pio == gio ? NULL : gio->io_bp,
-	    METASLAB_HINTBP_FAVOR | METASLAB_GANG_HEADER, METASLAB_ALLOC_UNKNOWN);
+	    METASLAB_HINTBP_FAVOR | METASLAB_GANG_HEADER,
+	    METASLAB_ALLOC_UNKNOWN, pio);
 	if (error) {
 		pio->io_error = error;
 		return (ZIO_PIPELINE_CONTINUE);
@@ -2128,8 +2129,7 @@ zio_dva_allocate(zio_t *zio)
 
 	error = metaslab_alloc(spa, mc, zio->io_size, bp,
 	    zio->io_prop.zp_copies, zio->io_txg, NULL, 0,
-		obj_type
-	);
+	    obj_type, zio);
 
 	if (error) {
 		if (error == ENOSPC && zio->io_size > SPA_MINBLOCKSIZE)
@@ -2195,11 +2195,13 @@ zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp, blkptr_t *old_bp,
 
 	if (use_slog)
 		error = metaslab_alloc(spa, spa_log_class(spa), size,
-		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID, METASLAB_ALLOC_UNKNOWN);
+		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID,
+		    METASLAB_ALLOC_UNKNOWN, NULL);
 
 	if (error)
 		error = metaslab_alloc(spa, spa_normal_class(spa), size,
-		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID, METASLAB_ALLOC_UNKNOWN);
+		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID,
+		    METASLAB_ALLOC_UNKNOWN, NULL);
 
 	if (error == 0) {
 		BP_SET_LSIZE(new_bp, size);

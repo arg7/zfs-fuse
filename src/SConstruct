@@ -61,6 +61,7 @@ if not (('-DDEBUG' in env['CCFLAGS']) or
 	sys.exit(1)
 
 env['CPPPATH'] = []
+env.Append(CPPPATH = ['#lib/liballoc_bias'])
 
 f = os.popen('uname -m')
 arch = f.readline().strip()
@@ -73,7 +74,7 @@ def getarch(arch):
 	if arch == 'x86_64':
 		return 'amd64'
 
-	if re.compile('i\d86').match(arch):
+	if re.compile(r'i\d86').match(arch):
 		return 'i386'
 
 	return 'generic'

@@ -214,8 +214,13 @@ extern unsigned char bcd_to_byte[256];
 /*
  * Macros for counting and rounding.
  */
+#ifndef howmany
 #define	howmany(x, y)	(((x)+((y)-1))/(y))
+#endif
+
+#ifndef roundup
 #define	roundup(x, y)	((((x)+((y)-1))/(y))*(y))
+#endif
 
 /*
  * Macro to determine if value is a power of 2

@@ -49,7 +49,7 @@
 
 #define ZFS_MAGIC 0x2f52f5
 
-// #define VERBOSE
+#define VERBOSE
 
 #ifdef VERBOSE
 #define print_debug printf

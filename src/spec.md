@@ -1,333 +1,376 @@
-  
+### **Specification: Streaming Allocator for Archival Workloads (v 1.5)**
 
-### **Specification: Streaming Allocator for Archival Workloads (v 1.3)**
+#### Preface: Solving the Archival Performance Gap in ZFS
+In large-scale archival workloads, such as legal document repositories, financial record storage, and backup systems, ZFS performance on spinning disks is frequently dominated by disk head seeks, not raw bandwidth. This issue is most acute when millions of small files are written concurrently. The default ZFS allocator strategies, optimized for general-purpose use, tend to scatter data and metadata blocks across the entire pool. This behavior destroys the spatial locality essential for efficient disk access, resulting in performance degradation—often 10x to 100x slower than theoretically possible—especially for metadata-intensive operations like find, ls -lR, zfs send, and zpool scrub.
+
+To address this, this document specifies the **Streaming Bias Engine**, the first implementation of the **Allocation Bias Framework** (`sys/zfs/alloc_bias.h`), activated by the `allocation:strategy=streaming` dataset property. The engine optimizes write-heavy, concurrent archival workloads by ensuring contiguous allocation, isolating writers (by PGID, UID, or GID), and separating data/metadata streams. The framework provides a generic, pluggable interface for allocation engines, enabling future extensibility.
 
 #### 1. Overview & Core Principles
+The **Allocation Bias Framework** is a policy-free layer integrated at the `vdev` level, dispatching allocation requests to pluggable engines via `metaslab_alloc()`. It manages stateful contexts in an AVL tree and extends `zio_t` to carry context (e.g., UID, GID, PGID). The **Streaming Bias Engine** is the first engine, optimizing archival workloads by:
+- Ensuring contiguous on-disk layout for related writes.
+- Isolating concurrent writers to prevent I/O stream interleaving.
+- Separating data and metadata into distinct, linear streams to optimize access patterns and prefetching.
 
-This document specifies the design of a specialized ZFS allocator, activated by the dataset property `allocation=streaming`. Its primary goal is to optimize performance for write-heavy, concurrent archival workloads by ensuring spatial locality for both data and metadata streams.
-
-The allocator is governed by four core principles:
-
-1.  **In-Memory:** The entire system of streaming contexts is a volatile, in-memory overlay. It provides "soft reservations" and allocation hints but **never** modifies the persistent on-disk free space map (AVL trees) until a block is truly being written as part of a transaction.
-
-2.  **Crash and Leak Proof:** Because no persistent state is created for reservations, the system is inherently safe. A crash or unexpected process exit cannot leak space. All state is rebuilt on the next write.
-
-3.  **Tiered Logic with Graceful Degradation:** The allocator uses a tiered funnel to find the best possible allocation. It always attempts to achieve perfect isolation first, then gracefully degrades to sharing, and only falls back to the default allocator as a last resort or if its internal resource limits are met.
-
-4.  **Self-Correcting:** The allocator treats its own state as a hint, not a guarantee. It constantly verifies its predictions against the ground truth of the block allocator and is designed to invalidate its own state and retry if a conflict occurs.
-
+The Streaming Bias Engine follows four principles:
+1. **In-Memory**: Contexts are volatile, providing soft reservations and hints without modifying the on-disk free space map until a block is written.
+2. **Crash and Leak Proof**: No persistent state ensures crash safety; state is rebuilt on the next write.
+3. **Tiered Logic with Graceful Degradation**: Attempts perfect isolation, degrades to sharing, and falls back to the default allocator if needed.
+4. **Self-Correcting**: Treats state as hints, invalidating and retrying on conflicts with the block allocator.
 
 #### 2. Data Structures
 
-  
+##### `alloc_bias_ops_t`
+A stateless vtable defining the interface for bias engines.
+
+```c
+typedef struct alloc_bias_ops {
+    const char *abo_name; // Engine name (e.g., "streaming")
+    size_t abo_private_ctx_size; // Size of engine-specific private data
+    boolean_t (*abo_filter_req_fn)(const alloc_bias_req_t *req);
+    uint64_t (*abo_get_stream_id_fn)(const alloc_bias_req_t *req);
+    alloc_bias_action_t (*abo_advise_alloc_fn)(alloc_bias_context_t **abc_p, const alloc_bias_req_t *req);
+    void (*abo_new_context_fn)(alloc_bias_context_t *abc, uint64_t stream_id, void *abh_region_handle, uint64_t segment_start, uint64_t segment_size);
+    int (*abo_get_hint_fn)(alloc_bias_context_t *abc, alloc_bias_hint_t *hint_out);
+    void (*abo_advance_fn)(alloc_bias_context_t *abc, uint64_t allocated_size);
+    boolean_t (*abo_is_stale_fn)(alloc_bias_context_t *abc, htime_t now);
+    alloc_bias_context_t *(*abo_find_conflicting_context_fn)(const void *hint_handle);
+    void (*abo_get_alternative_hint_fn)(alloc_bias_context_t *conflicting_abc, alloc_bias_hint_t *hint_out);
+} alloc_bias_ops_t;
+```
 
 ##### `alloc_bias_context_t`
-
-The core state for an active stream is held in this structure. An entry is considered "in-use" if `abc_gpid != 0`.
+A generic, stateful context for a single biased stream, stored in an AVL tree.
 
 ```c
-
-typedef  struct alloc_bias_context {
-
-// The Process Group ID this context belongs to. Key for lookups.
-// If 0, this entry in the array is considered free.
-
-pid_t abc_gpid;
-
-// The stream type this context serves (e.g., DATA or METADATA).
-
-stream_type_t abc_stream_type;
-
-// Pointer to the metaslab this context has a soft reservation on.
-
-metaslab_t* abc_metaslab;
-
-// ---- The Soft Reservation ----
-
-uint64_t abc_segment_start;
-
-// This value is mutable for the Fair Sharing mechanism.
-uint64_t abc_segment_end;
-
-// ---- The Consumption State ----
-uint64_t abc_cursor;
-
-uint64_t abc_chunk_size;
-
-// ---- Lifecycle Management ----
-uint64_t abc_last_used;
-
+typedef struct alloc_bias_context {
+    avl_node_t abc_node; // AVL tree node
+    alloc_bias_ops_t *abc_ops; // Engine operations
+    uint64_t abc_primary_key; // Engine-defined key (e.g., PGID, UID, GID)
+    uint64_t abc_stream_id; // Engine-defined stream (e.g., DATA, METADATA)
+    char abc_private_data[]; // Engine-specific state
 } alloc_bias_context_t;
-
 ```
-##### `vdev_t` additions
 
-The `vdev_t` struct will hold the pre-allocated array of contexts.
+##### `alloc_bias_req_t`
+Packages an allocation request for the engine.
 
 ```c
+typedef struct alloc_bias_req {
+    void *abr_io_req; // IO request details
+    uint64_t abr_size; // Requested size
+    alloc_bias_hint_t *abr_backend_hint; // Incoming hint from backend
+```
 
+##### `alloc_bias_hint_t`
+The engine’s allocation hint.
+
+```c
+typedef struct alloc_bias_hint {
+    void *abh_region_handle; // Opaque region (e.g., metaslab_t*)
+    uint64_t abh_offset; // Suggested offset
+    uint64_t abh_flags; // Hint flags
+} alloc_bias_hint_t;
+```
+
+##### `alloc_bias_action_t`
+Directs the allocator’s action.
+
+```c
+typedef enum alloc_bias_action {
+    BIAS_ACTION_FALLBACK, // Use default allocator
+    BIAS_ACTION_ALLOC_FROM_HINT, // Allocate from hint
+    BIAS_ACTION_CREATE_NEW_CONTEXT // Create new context
+} alloc_bias_action_t;
+```
+
+##### `streaming_bias_private_t`
+Streaming Bias Engine-specific state, stored in `abc_private_data`.
+
+```c
+typedef struct streaming_bias_private {
+    stream_type_t sbp_stream_type; // DATA or METADATA
+    metaslab_t *sbp_metaslab; // Reserved metaslab
+    uint64_t sbp_segment_start; // Soft reservation start
+    uint64_t sbp_segment_end; // Soft reservation end (mutable)
+    uint64_t sbp_cursor; // Current allocation offset
+    uint64_t sbp_chunk_size; // Chunk size
+    uint64_t sbp_last_used; // Last activity timestamp
+} streaming_bias_private_t;
+```
+
+##### `vdev_t` Additions
+Stores contexts in an AVL tree, protected by `vdev_metaslab_lock`.
+
+```c
 // in struct vdev:
-
 // ... existing fields ...
-
-/*
-* A fixed-size array of contexts for the streaming allocator.
-* Protected by the vdev_metaslab_lock.
-*/
-
-alloc_bias_context_t  vdev_alloc_bias_contexts[archive_max_contexts];
-
+avl_tree_t vdev_alloc_bias_contexts; // AVL tree of contexts
 // ... existing fields ...
-
 ```
 
-  
+#### 3. Framework Integration
+The Allocation Bias Framework integrates at the `vdev` level, hooking into `metaslab_alloc()` to dispatch requests to the active engine (selected via `allocation:strategy`). The public API includes:
+- `int ab_register_engine(const char *name, alloc_bias_ops_t *ops)`: Registers a new engine.
+- `void ab_deregister_engine(const char *name)`: Deregisters an engine.
+- `ab_find_engine_by_name(const char *name)`: Finds an engine by name (e.g., “streaming”).
 
-##### `metaslab_t` addition
+#### 4. Configuration
+- **Framework Property**:
+  - `allocation:strategy = "default" | "streaming"` (default: `default`): Selects the engine via `ab_find_engine_by_name`.
+- **Streaming Bias Engine Properties**:
+  - `streaming:bias_key = "pgid" | "uid" | "gid"` (default: `pgid`): Key for stream isolation.
+  - `streaming:max_contexts = 64`: Maximum concurrent streams per vdev.
+  - `streaming:timeout_data = 300s`: Inactivity timeout for data streams.
+  - `streaming:timeout_metadata = 600s`: Inactivity timeout for metadata streams.
+  - `streaming:max_chunk_size_data = 256M`: Maximum data stream consumption.
+  - `streaming:max_chunk_size_metadata = 64M`: Maximum metadata stream consumption.
 
-A volatile counter is added to the `metaslab_t` struct for load balancing.
+#### 5. Core Algorithm I: New Stream Activation
+Executed by `abo_advise_alloc_fn` when no context exists for the key (PGID/UID/GID). Returns an `alloc_bias_action_t`.
 
-```c
+**Initial Step: Check Context Limit**
+1. Check if `vdev_alloc_bias_contexts` AVL tree size is below `streaming:max_contexts`.
+2. If at limit, return `BIAS_ACTION_FALLBACK` (use `metaslab_df_alloc`).
 
-// in struct metaslab:
-// ... existing fields ...
+**Tier 1: Ideal Path (Perfect Isolation)**
+1. Iterate vdev’s metaslabs.
+2. Analyze `vdev_alloc_bias_contexts` AVL tree to find the metaslab with the fewest active contexts and a free segment ≥ `max_chunk_size` (based on `sbp_stream_type`).
+3. **On Success**:
+   - Create a new context via `abo_new_context_fn`, reserving the segment.
+   - Return `BIAS_ACTION_CREATE_NEW_CONTEXT`.
 
-uint32_t ml_bias_reservations;
+**Tier 2: Pragmatic Path (Fair Reservation Splitting)**
+1. **Condition**: Tier 1 fails.
+2. Scan in-use contexts in `vdev_alloc_bias_contexts`.
+3. Find a donor context where sharable space (`sbp_segment_end - (sbp_segment_start + sbp_chunk_size)`) is ≥ `max_chunk_size`.
+4. **On Success**:
+   - Cap donor’s `sbp_segment_end`.
+   - Create a new context via `abo_new_context_fn`.
+   - Return `BIAS_ACTION_CREATE_NEW_CONTEXT`.
 
-```
+**Tier 3: Fallback Path**
+1. **Condition**: Tiers 1 and 2 fail.
+2. Return `BIAS_ACTION_FALLBACK`.
 
-#### 3. Configuration
+#### 6. Core Algorithm II: Allocation within an Active Stream
+Handles allocation for an existing context, using `abo_get_hint_fn`, `abo_advance_fn`, `abo_find_conflicting_context_fn`, and `abo_get_alternative_hint_fn`.
 
-The allocator is controlled by a dataset property and several module parameters or tunables.
+1. **Filtering and Classification**:
+   - `abo_filter_req_fn`: Filters requests (e.g., user data writes).
+   - `abo_get_stream_id_fn`: Classifies into streams (`ZIO_TYPE_DATA` for data, `ZIO_TYPE_DNODE`, etc., for metadata).
+2. **Chunk Chaining**:
+   - If `sbp_cursor` depletes the chunk, chain to a new chunk in the reservation.
+   - If reservation is exhausted, invalidate context and restart via Algorithm I.
+3. **Skip-and-Continue (Fragmentation)**:
+   - If a rogue allocation punctures the segment, advance `sbp_cursor` past it.
+4. **Hint Manipulation (Conflict Avoidance)**:
+   - `abo_find_conflicting_context_fn`: Checks if default allocator’s `hint_handle` conflicts with the context.
+   - `abo_get_alternative_hint_fn`: Provides an alternative hint if needed.
+5. **Get Hint**:
+   - `abo_get_hint_fn`: Sets `hint_out->abh_offset = sbp_cursor`.
+6. **Attempt Allocation**:
+   - Allocate using the hint.
+   - If `actual_offset == abh_offset`: Call `abo_advance_fn` to update `sbp_cursor` and `sbp_last_used`.
+   - If `actual_offset != abh_offset`: Invalidate context. Keep allocated block if valid; otherwise, fall back to `metaslab_df_alloc`.
 
-*  **Dataset Property:**  `allocation=streaming` (enables the feature).
+#### 7. State Management & Cleanup
+During `spa_sync()`, scan `vdev_alloc_bias_contexts`. For each context:
+- If `(current_time - sbp_last_used) > streaming:timeout_data` (data) or `streaming:timeout_metadata` (metadata), call `abo_is_stale_fn` to confirm staleness and remove the context from the AVL tree.
 
-*  **Module Parameter / Tunable:**
+#### 8. Future Work
+The Allocation Bias Framework supports new engines, such as:
+- A locality engine for contiguous file allocation.
+- An ML-driven engine using userspace hooks (FUSE or `ioctl`).
 
-*  `streaming:max_contexts`: Default 64. The maximum number of concurrent streams per vdev. This defines the size of the pre-allocated context array.
+#### 9. UML Diagrams
 
-*  **Dataset-Scoped Tunables:**
-
-*  `streaming:max_chunk_size_data`: Default 256M. Max consumption per stream for data.
-
-*  `streaming:max_chunk_size_metadata`: Default 64M. Max consumption per stream for metadata.
-
-*  `streaming:context_timeout`: Default 60s. Inactivity timeout for streaming contexts.
-
-  
-#### 4. Core Algorithm I: New Stream Activation
-
-This logic is executed when a write occurs for a PGID+StreamType that does not have an existing active context.
-
-**Initial Step: Check for Free Context Slot**
-
-1. Scan the `vdev_alloc_bias_contexts` array.
-
-2. If no entry has `abc_gpid == 0`, the context array is full. The allocator **immediately falls back to `metaslab_df_alloc`** for this transaction and the algorithm terminates here.
-
-##### Tier 1: The Ideal Path (Perfect Isolation & Load Balancing)
-
-1. Iterate through the vdev's metaslabs.
-
-2. Find the metaslab with the **lowest `ml_bias_reservations` count** that also contains a free segment ≥ `max_chunk_size`.
-
-3.  **On Success:**
-
-* Increment the chosen metaslab's `ml_bias_reservations` counter.
-
-* Find a free slot in the context array and populate it.
-
-* The context is configured with a soft reservation over the entire found free segment.
-
-* Proceed to allocate the block (Algorithm II).
-
-
-##### Tier 2: The Pragmatic Path (Fair Reservation Splitting)
-
-1.  **Condition:** Tier 1 fails to find a suitable metaslab.
-
-2. The allocator now scans the *in-use* entries in the `vdev_alloc_bias_contexts` array.
-
-3. It searches for a "donor" context where the sharable space (`abc_segment_end - (abc_segment_start + abc_chunk_size)`) is ≥ `max_chunk_size`.
-
-4.  **On Success:**
-
-* The donor context's `abc_segment_end` is capped to its fair share.
-
-* A new context for the current PGID is created in a free array slot, reserving the remainder.
-
-* Proceed to allocate the block (Algorithm II).
-
-
-##### Tier 3: The Fallback Path
-
-  
-
-1.  **Condition:** Tiers 1 and 2 both fail.
-
-2. It **forwards the allocation request to `metaslab_df_alloc`**. No streaming context is created.
-
-
-#### 5. Core Algorithm II: Allocation within an Active Stream
-
-This logic is executed when an active context for the PGID+StreamType already exists.
-
-1.  **Chunk Chaining Logic:** If the current chunk is depleted, attempt to chain to a new one within the same reservation. If the reservation is exhausted, clear the context (`abc_gpid = 0`), decrement the metaslab's reservation counter, and restart the allocation process from Algorithm I to find a new home for the stream.
-
-2.  **Get Hint:** The allocation hint is `hint_offset = context->abc_cursor`.
-
-3.  **Attempt Allocation & Verify Result:**
-
-* Call the low-level block allocator with the hint.
-
-*  **If `actual_offset == hint_offset` (Success):** Advance the cursor and update the timestamp.
-
-*  **If `actual_offset != hint_offset` (Conflict):** The context is invalid. Clear the context slot (`abc_gpid = 0`), decrement the metaslab's reservation counter, and restart the allocation process from Algorithm I.
-
-#### 6. State Management & Cleanup
-
-Cleanup is performed lazily during `spa_sync()`. A `spa_sync()` thread will scan the `vdev_alloc_bias_contexts` array. For each in-use entry, it checks for timeout:
-
-* If `(current_time - context->abc_last_used) > pid_timeout`, the context is considered stale.
-
-* The entry is cleared by setting `context->abc_gpid = 0`.
-
-* The corresponding metaslab's `ml_bias_reservations` counter is decremented.
-
-
-## UML diagrams
-
+##### Allocation Flow
+Decision tree for allocation requests.
 
 ```mermaid
 graph TD
-    A((PGID->write)) --> B{Is `archive_concurrent` enabled?};
-    B -- No --> C[Default Allocator];
+    A((Allocation Request)) --> B{Is `streaming` enabled?};
+    B -- No --> C[Use Default Allocator];
     B -- Yes --> D{Active Context Exists?};
     
     D -- No --> ALG1(Execute Algorithm I: New Stream Activation);
-    ALG1 --> H{Context Created?};
-    H -- No --> C;
-    H -- Yes --> F[Get Context Hint];
+    ALG1 --> H{Action?};
+    H -- BIAS_ACTION_FALLBACK --> C;
+    H -- BIAS_ACTION_CREATE_NEW_CONTEXT --> F[Get Hint via abo_get_hint_fn];
     
     D -- Yes --> ALG2_PRE(Pre-Allocation Checks);
-    ALG2_PRE --> K{Chunk has space?};
+    ALG2_PRE --> K{Current chunk has space?};
     K -- Yes --> F;
-    K -- No --> L{Can Chain to New Chunk?};
+    K -- No --> L{Can chain to new chunk?};
     
-    L -- Yes --> Adjust_Chain[Adjust Context for New Chunk];
+    L -- Yes --> Adjust_Chain[Adjust context for new chunk];
     Adjust_Chain --> F;
     
-    L -- No --> Invalidate_and_Retry[Invalidate Context & Retry Allocation];
+    L -- No --> Invalidate_and_Retry[Invalidate context & retry];
     Invalidate_and_Retry --> ALG1;
 
-    F --> M[Attempt Allocation at Hint];
-    M --> N{Hint == Actual Block?};
+    F --> M[Attempt allocation at hint];
+    M --> N{Actual offset == hint offset?};
     
-    N -- Yes (Success) --> T[Advance Cursor & Timestamp];
+    N -- Yes --> T[Call abo_advance_fn];
     T --> SUCCESS[Success];
     
-    N -- No (Conflict) --> Invalidate_And_Check[Invalidate Context & Check Status];
-    Invalidate_And_Check --> O{Was a Block Allocated *Anywhere*?};
+    N -- No --> Invalidate_And_Check[Invalidate context];
+    Invalidate_And_Check --> O{Was a block allocated?};
     O -- Yes --> SUCCESS;
     O -- No --> C;
 
-    C --> R{ok?};
+    C --> R{Allocation succeeded?};
     R -- No --> FAIL[Fail I/O];
     R -- Yes --> SUCCESS;
 
     FAIL --> X((End));
-    SUCCESS --> X((End));
-
+    SUCCESS --> X((End));    
 ```
 
-#### 2. Algorithm I: New Stream Activation
-
-This diagram details the three-tiered funnel logic for creating a new stream. It shows how the allocator tries for the ideal outcome first before gracefully degrading.
+##### Algorithm I: New Stream Activation
+Three-tiered logic for creating a new stream.
 
 ```mermaid
 graph TD
-    A[Start: New Stream Needed] --> B{Is Context Array Full?};
-    B -- Yes --> Z[Fallback to `metaslab_df_alloc`];
+    A[Start: New stream needed] --> B{Context limit reached?};
+    B -- Yes --> Z[Return BIAS_ACTION_FALLBACK];
 
-    B -- No --> T1_Start(Tier 1: Find Ideal Metaslab);
-    T1_Start --> T1_Check{Find least-loaded metaslab<br/>with >= chunk_size free?};
-    T1_Check -- Yes --> T1_Success[Create New Context in Metaslab];
+    B -- No --> T1_Start(Tier 1: Find ideal region);
+    T1_Start --> T1_Check{Find region with fewest contexts<br/>and ≥ chunk_size free?};
+    T1_Check -- Yes --> T1_Success[Call abo_new_context_fn];
+    T1_Success --> Y[Return BIAS_ACTION_CREATE_NEW_CONTEXT];
 
-    T1_Check -- No --> T2_Start(Tier 2: Find Sharable Reservation);
-    T2_Start --> T2_Check{Find existing context<br/>that can be split?};
-    T2_Check -- Yes --> T2_Success[Split Donor's Reservation<br/>Create New Context];
+    T1_Check -- No --> T2_Start(Tier 2: Find sharable reservation);
+    T2_Start --> T2_Check{Find active context with splittable space?};
+    T2_Check -- Yes --> T2_Success[Split reservation & create context];
+    T2_Success --> Y;
     
     T2_Check -- No --> T3_Start(Tier 3: Fallback);
     T3_Start --> Z;
-    
-    T1_Success --> Y[Proceed to Allocate];
-    T2_Success --> Y[Proceed to Allocate];
 ```
 
-**Explanation:** The process begins by checking if a slot is available in the fixed-size context array. If not, it immediately falls back. Otherwise, it attempts the three tiers in order:
-1.  **Tier 1:** Tries to find a lightly-used metaslab to ensure physical isolation.
-2.  **Tier 2:** If isolation isn't possible, it tries to enable concurrency by splitting an existing large reservation.
-3.  **Tier 3:** If neither of the optimized paths is available, it gives up on streaming for this transaction and uses the default allocator.
-
----
-
-#### 3. Algorithm II: Allocation within an Active Stream
-
-This diagram shows the "hot path" for a stream that is already active. It includes the chunk-chaining logic and the critical self-correction mechanism.
+##### Algorithm II: Allocation within an Active Stream
+Hot path for active streams.
 
 ```mermaid
+
 graph TD
-    A[Start: Active Context Found] --> B{Chunk Consumed?};
-    B -- Yes --> C{Attempt Chunk Chaining};
+    A[Start: Active context found] --> B{Current chunk exhausted?};
+    B -- Yes --> C{Can chain to new chunk?};
     
-    C -- No (Reservation Exhausted) --> Invalidate_and_Restart[Invalidate Context & Restart from Alg. I];
-    C -- Yes (Chained) --> Adjust_Context[Adjust Context for New Chunk];
-    Adjust_Context --> D[Get Hint from Cursor];
+    C -- No --> Invalidate_and_Restart[Invalidate context & restart from Alg. I];
+    C -- Yes --> Adjust_Context[Update context for new chunk];
+    Adjust_Context --> D[Get hint via abo_get_hint_fn];
 
     B -- No --> D;
 
-    D --> E[Attempt allocation at hint];
-    E --> F{Allocation Succeeded *at all*?};
+    D --> E[Check for fragmentation];
+    E --> F[Skip-and-continue if needed];
+    F --> G[Check conflict via abo_find_conflicting_context_fn];
+    G --> H[Get alternative hint if needed];
+    H --> I[Attempt allocation at hint];
+    I --> J{Allocation succeeded?};
     
-    F -- No --> Invalidate_and_Retry_Default[Invalidate Context & Retry w/ Default Allocator];
+    J -- No --> Invalidate_and_Retry_Default[Invalidate & use default allocator];
     
-    F -- Yes --> G{Was `actual_offset == hint_offset`?};
+    J -- Yes --> K{actual_offset == abh_offset?};
     
-    G -- Yes (Hint Hit) --> H[Advance Cursor & Timestamp];
-    H --> I[Return DVA];
+    K -- Yes --> L[Call abo_advance_fn];
+    L --> M[Return allocated block];
 
-    G -- No (Hint Miss) --> Invalidate_and_Succeed[Invalidate Context];
-    Invalidate_and_Succeed --> I;
+    K -- No --> N{Is actual_offset within current chunk?};
+    
+    N -- Yes --> O[Advance cursor to actual_offset + allocated_size];
+    O --> M;
+
+    N -- No --> P[Invalidate context];
+    P --> Q{Was a block allocated?};
+    Q -- Yes --> M;
+    Q -- No --> Invalidate_and_Retry_Default;
+
 ```
 
-**Explanation:** This is the most common path. The allocator first checks if it needs to advance to a new chunk within its reservation. It then gets its hint (the cursor) and attempts the allocation. The most important step is the verification: if the allocation didn't happen exactly where predicted, the context is considered corrupt and is invalidated, forcing the system to find a new, valid reservation for the stream.
-
----
-
-#### 4. Data Structure Relationships
-
-This class diagram shows how the core data structures relate to each other.
+##### Framework Class Diagram
+Shows the Allocation Bias Framework’s components.
 
 ```mermaid
 classDiagram
     class vdev_t {
-        +alloc_bias_context_t vdev_alloc_bias_contexts[64]
+        +avl_tree_t vdev_alloc_bias_contexts
     }
-    class metaslab_t {
-        +uint32_t ml_bias_reservations
+    
+    class alloc_bias_ops_t {
+        +const char* abo_name
+        +size_t abo_private_ctx_size
+        +boolean_t abo_filter_req_fn(alloc_bias_req_t*)
+        +uint64_t abo_get_stream_id_fn(alloc_bias_req_t*)
+        +alloc_bias_action_t abo_advise_alloc_fn(alloc_bias_context_t**, alloc_bias_req_t*)
+        +void abo_new_context_fn(alloc_bias_context_t*, uint64_t, void*, uint64_t, uint64_t)
+        +int abo_get_hint_fn(alloc_bias_context_t*, alloc_bias_hint_t*)
+        +void abo_advance_fn(alloc_bias_context_t*, uint64_t)
+        +boolean_t abo_is_stale_fn(alloc_bias_context_t*, uint64_t)
+        +alloc_bias_context_t* abo_find_conflicting_context_fn(void*)
+        +void abo_get_alternative_hint_fn(alloc_bias_context_t*, alloc_bias_hint_t*)
     }
+    
     class alloc_bias_context_t {
-        +pid_t abc_gpid
-        +metaslab_t* abc_metaslab
+        +avl_node_t abc_node
+        +alloc_bias_ops_t* abc_ops
+        +uint64_t abc_primary_key
+        +uint64_t abc_stream_id
+        +char abc_private_data[]
+    }
+    
+    class alloc_bias_req_t {
+        +void* abr_io_req
+        +uint64_t abr_size
+        +alloc_bias_hint_t* abr_hint_handle
+    }
+    
+    class alloc_bias_hint_t {
+        +void* abh_region_handle
+        +uint64_t abh_offset
+        +uint64_t abh_flags
+    }
+    
+    class alloc_bias_action_t {
+        <<enumeration>>
+        BIAS_ACTION_FALLBACK
+        BIAS_ACTION_ALLOC_FROM_HINT
+        BIAS_ACTION_CREATE_NEW_CONTEXT
     }
 
-    vdev_t "1" -- "1" alloc_bias_context_t : contains fixed-size array of
-    vdev_t "1" -- "0..*" metaslab_t : contains many
-    alloc_bias_context_t "0..*" -- "1" metaslab_t : points to
+    vdev_t "1" -- "0..*" alloc_bias_context_t : contains
+    alloc_bias_ops_t "1" -- "1" alloc_bias_context_t : manages
+    alloc_bias_ops_t "1" -- "1" alloc_bias_req_t : processes
+    alloc_bias_ops_t "1" -- "1" alloc_bias_hint_t : produces
+    alloc_bias_context_t "1" -- "1" abc_private_data : embeds engine state
 ```
 
-**Explanation:**
-*   A `vdev_t` (vdev) contains the single, fixed-size array of `alloc_bias_context_t`s.
-*   A `vdev_t` also contains many `metaslab_t`s.
-*   An `alloc_bias_context_t` (a stream context) holds a pointer to exactly **one** `metaslab_t` where its reservation lives.
-*   The `ml_bias_reservations` counter on a `metaslab_t` implicitly tracks how many contexts are currently pointing to it, serving as a hint for load balancing. for load balancing.
+##### Data Structure Relationships
+Shows Streaming Bias Engine relationships.
+
+```mermaid
+classDiagram
+    class vdev_t {
+        +avl_tree_t vdev_alloc_bias_contexts
+    }
+    class metaslab_t {
+    }
+    class alloc_bias_context_t {
+        +avl_node_t abc_node
+        +alloc_bias_ops_t* abc_ops
+        +uint64_t abc_primary_key
+        +uint64_t abc_stream_id
+        +char abc_private_data[]
+    }
+    class streaming_bias_private_t {
+        +metaslab_t* sbp_metaslab
+    }
+
+    vdev_t "1" -- "1" alloc_bias_context_t : contains AVL tree of
+    vdev_t "1" -- "0..*" metaslab_t : contains many
+    alloc_bias_context_t "1" -- "1" streaming_bias_private_t : contains
+    streaming_bias_private_t "0..*" -- "1" metaslab_t : points to
+```
