@@ -1909,15 +1909,16 @@ top:
 			    (log_msp->ms_map.sm_start >> vd->vdev_ms_shift) : 0;
 
 				printf("ALLOCDBG time=%" PRIu64 " vdev=%" PRIu64
-				    " metaslab=%" PRIu64 " hint=0x%016" PRIx64
-				    " actual=0x%016" PRIx64 " obj_type=%u\n",
+				    " metaslab=%04" PRIu64 " hint=0x%016" PRIx64
+				    " actual=0x%016" PRIx64 " obj_type=%s\n",
 				    (uint64_t)now,
 				    vd->vdev_id,
 				    metaslab_index,
 				    hint_offset,
 				    actual_offset,
-				    (unsigned int)obj_type);
+				    get_obj_type_name(obj_type));
 			}
+
 #endif
 
 			if (bias_ops != NULL && create_ctx && bias_key != 0 &&
