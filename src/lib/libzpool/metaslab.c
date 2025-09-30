@@ -605,7 +605,7 @@ metaslab_df_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 	uint64_t cur = *cursor;
 	uint64_t ret = metaslab_block_picker(t, cursor, size, 1ULL);
 
-#ifdef ALLOC_DEBUG
+#if 0
 	static char* hints[] = {"hit ", "near", "far "};
 	char *phint;
 
@@ -631,6 +631,7 @@ metaslab_df_alloc(space_map_t *sm, uint64_t size, dmu_object_type_t obj_type)
 	uint64_t absolute_offset = 0x400000 + ret;
 	printf("%8s metaslab_df_alloc(size=0x%04x)=> 0x%016" PRIx64 " -> hint=%s, obj_type=%s\n", buf, (int)size, absolute_offset, phint, get_obj_type_name(obj_type));
 #endif
+
 	return ret;
 }
 
