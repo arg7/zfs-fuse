@@ -254,6 +254,7 @@ ztest_func_t ztest_vdev_LUN_growth;
 ztest_func_t ztest_vdev_add_remove;
 ztest_func_t ztest_vdev_aux_add_remove;
 ztest_func_t ztest_split_pool;
+ztest_func_t ztest_metaslab_iter;
 
 uint64_t zopt_always = 0ULL * NANOSEC;		/* all the time */
 uint64_t zopt_incessant = 1ULL * NANOSEC / 10;	/* every 1/10 second */
@@ -290,6 +291,7 @@ ztest_info_t ztest_info[] = {
 	{ ztest_vdev_LUN_growth,		1,	&zopt_rarely	},
 	{ ztest_vdev_add_remove,		1,	&zopt_vdevtime	},
 	{ ztest_vdev_aux_add_remove,		1,	&zopt_vdevtime	},
+	{ ztest_metaslab_iter,			1,	&zopt_sometimes	},
 };
 
 #define	ZTEST_FUNCS	(sizeof (ztest_info) / sizeof (ztest_info_t))
@@ -2373,6 +2375,121 @@ ztest_split_pool(ztest_ds_t *zd, uint64_t id)
 	}
 	VERIFY(mutex_unlock(&zs->zs_vdev_lock) == 0);
 
+}
+
+/*
+ * Verify that the metaslab allocator iterator walks the AVL trees in order.
+ */
+/* ARGSUSED */
+void
+ztest_metaslab_iter(ztest_ds_t *zd, uint64_t id)
+{
+	spa_t *spa = dmu_objset_spa(zd->zd_os);
+	const vdev_alloc_backend_ops_t *ops = metaslab_get_alloc_backend_ops();
+	metaslab_t *msp = NULL;
+	vab_iter_t *iter = NULL;
+	space_map_t *sm;
+	boolean_t held_config = B_FALSE;
+	boolean_t held_lock = B_FALSE;
+
+	if (ops == NULL)
+		return;
+
+	spa_config_enter(spa, SCL_STATE, FTAG, RW_READER);
+	held_config = B_TRUE;
+
+	vdev_t *rvd = spa->spa_root_vdev;
+	if (rvd == NULL || rvd->vdev_children == 0)
+		goto out;
+
+	vdev_t *tvd = rvd->vdev_child[ztest_random_vdev_top(spa, B_TRUE)];
+	if (tvd == NULL || tvd->vdev_ms == NULL || tvd->vdev_ms_count == 0)
+		goto out;
+
+	for (int tries = 0; tries < 16; tries++) {
+		metaslab_t *candidate =
+		    tvd->vdev_ms[ztest_random(tvd->vdev_ms_count)];
+		if (candidate != NULL) {
+			msp = candidate;
+			break;
+		}
+	}
+
+	if (msp == NULL)
+		goto out;
+
+	mutex_enter(&msp->ms_lock);
+	held_lock = B_TRUE;
+	spa_config_exit(spa, SCL_STATE, FTAG);
+	held_config = B_FALSE;
+
+	sm = &msp->ms_map;
+	space_map_ops_t *sm_ops = msp->ms_group->mg_class->mc_ops;
+	spa_t *mspa = msp->ms_group->mg_vd->vdev_spa;
+
+	space_map_load_wait(sm);
+	if (!sm->sm_loaded) {
+		if (space_map_load(sm, sm_ops, SM_FREE, &msp->ms_smo,
+		    spa_meta_objset(mspa)) != 0)
+			goto out;
+		for (int t = 0; t < TXG_DEFER_SIZE; t++)
+			space_map_walk(&msp->ms_defermap[t], space_map_claim, sm);
+	}
+
+	if (sm->sm_pp_root == NULL || avl_numnodes(&sm->sm_root) == 0)
+		goto out;
+
+	VERIFY(ops->vab_iter_create(msp, VAB_ITER_ORDER_OFFSET, &iter) == 0);
+	{
+		space_seg_t *expected = avl_first(&sm->sm_root);
+		const vab_free_segment_t *seg = ops->vab_iter_get_segment(iter);
+
+		if (expected == NULL) {
+			VERIFY(seg == NULL);
+		} else {
+			while (expected != NULL && seg != NULL) {
+				VERIFY3P(seg, ==, expected);
+				expected = AVL_NEXT(&sm->sm_root, expected);
+				if (!ops->vab_iter_next(iter))
+					break;
+				seg = ops->vab_iter_get_segment(iter);
+			}
+			VERIFY(expected == NULL);
+			VERIFY(ops->vab_iter_get_segment(iter) == NULL);
+		}
+	}
+	ops->vab_iter_destroy(iter);
+	iter = NULL;
+
+	VERIFY(ops->vab_iter_create(msp, VAB_ITER_ORDER_SIZE, &iter) == 0);
+	{
+		space_seg_t *expected = avl_last(sm->sm_pp_root);
+		const vab_free_segment_t *seg = ops->vab_iter_get_segment(iter);
+
+		if (expected == NULL) {
+			VERIFY(seg == NULL);
+		} else {
+			while (expected != NULL && seg != NULL) {
+				VERIFY3P(seg, ==, expected);
+				expected = AVL_PREV(sm->sm_pp_root, expected);
+				if (!ops->vab_iter_next(iter))
+					break;
+				seg = ops->vab_iter_get_segment(iter);
+			}
+			VERIFY(expected == NULL);
+			VERIFY(ops->vab_iter_get_segment(iter) == NULL);
+		}
+	}
+	ops->vab_iter_destroy(iter);
+	iter = NULL;
+
+out:
+	if (iter != NULL)
+		ops->vab_iter_destroy(iter);
+	if (held_lock)
+		mutex_exit(&msp->ms_lock);
+	if (held_config)
+		spa_config_exit(spa, SCL_STATE, FTAG);
 }
 
 /*

@@ -39,7 +39,7 @@
 uint64_t metaslab_aliquot = 512ULL << 10;
 uint64_t metaslab_gang_bang = SPA_MAXBLOCKSIZE + 1;	/* force gang blocks */
 
-#define ALLOC_DEBUG
+//#define ALLOC_DEBUG
 
 /**
  * container_of - cast a member of a structure out to the containing structure
