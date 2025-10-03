@@ -71,13 +71,11 @@ typedef struct vdev_alloc_backend_ops {
      *
      * @param[in]  region_handle The handle of the region to iterate over.
      * @param[in]  order         The desired ordering of segments (by offset or size).
-     * @param[in]  min_size      A filter to only return segments of at least this size.
-     *                           Set to 0 to return all segments.
      * @param[out] iter_out      On success, holds the handle to the new iterator.
      * @return 0 on success, error code on failure.
      */
     int (*vab_iter_create)(void *region_handle, vab_iter_order_t order,
-        uint64_t min_size, vab_iter_t **iter_out);
+        vab_iter_t **iter_out);
 
     /**
      * @brief Retrieves the next free segment from an iterator.

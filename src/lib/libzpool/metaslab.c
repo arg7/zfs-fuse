@@ -1254,9 +1254,10 @@ metaslab_distance(metaslab_t *msp, dva_t *dva)
 
 struct vab_iter {
 	metaslab_t	*vi_msp;
-	size_t		vi_count;
-	size_t		vi_index;
-	vab_free_segment_t vi_segments[];
+	vab_iter_order_t	vi_order;
+	avl_tree_t	*vi_tree;
+	space_seg_t	*vi_node;
+	boolean_t	vi_exhausted;
 };
 
 static int
@@ -1313,20 +1314,6 @@ metaslab_alloc_from_hint(metaslab_t *msp, uint64_t offset, uint64_t size,
 	mutex_exit(&msp->ms_lock);
 
 	return (offset);
-}
-
-static void
-metaslab_sort_segments_by_size(vab_free_segment_t *segments, size_t count)
-{
-	for (size_t i = 1; i < count; i++) {
-		vab_free_segment_t tmp = segments[i];
-		size_t j = i;
-		while (j > 0 && segments[j - 1].vfs_size < tmp.vfs_size) {
-			segments[j] = segments[j - 1];
-			j--;
-		}
-		segments[j] = tmp;
-	}
 }
 
 static void *
@@ -1413,7 +1400,8 @@ metaslab_backend_is_free(void *region_handle, uint64_t offset, uint64_t size)
 		return (B_FALSE);
 
 	mutex_enter(&msp->ms_lock);
-	if (metaslab_load_space_map_locked(msp) == 0)
+	ASSERT(msp->ms_map.sm_loaded);
+	if (msp->ms_map.sm_loaded)
 		result = space_map_contains(&msp->ms_map, offset, size);
 	mutex_exit(&msp->ms_lock);
 
@@ -1422,54 +1410,32 @@ metaslab_backend_is_free(void *region_handle, uint64_t offset, uint64_t size)
 
 static int
 metaslab_backend_iter_create(void *region_handle, vab_iter_order_t order,
-    uint64_t min_size, vab_iter_t **iter_out)
+    vab_iter_t **iter_out)
 {
 	metaslab_t *msp = region_handle;
-	vab_iter_t *iter;
-	size_t count = 0;
-	space_seg_t *ss;
-
 	if (msp == NULL || iter_out == NULL)
 		return (EINVAL);
 
-	mutex_enter(&msp->ms_lock);
-	int error = metaslab_load_space_map_locked(msp);
-	if (error != 0) {
-		mutex_exit(&msp->ms_lock);
-		return (error);
-	}
-
-	for (ss = avl_first(&msp->ms_map.sm_root);
-	    ss != NULL; ss = AVL_NEXT(&msp->ms_map.sm_root, ss)) {
-		uint64_t seg_size = ss->ss_end - ss->ss_start;
-		if (seg_size >= min_size)
-			count++;
-	}
-
-	size_t alloc_size = sizeof (vab_iter_t) +
-	    (count * sizeof (vab_free_segment_t));
-	iter = kmem_zalloc(alloc_size, KM_SLEEP);
+	vab_iter_t *iter = kmem_zalloc(sizeof (vab_iter_t), KM_SLEEP);
 	iter->vi_msp = msp;
-	iter->vi_count = count;
-	iter->vi_index = 0;
+	iter->vi_order = order;
+	iter->vi_tree = (order == VAB_ITER_ORDER_SIZE) ?
+	    msp->ms_map.sm_pp_root : &msp->ms_map.sm_root;
+	iter->vi_node = NULL;
+	iter->vi_exhausted = B_FALSE;
 
-	if (count != 0) {
-		size_t idx = 0;
-		for (ss = avl_first(&msp->ms_map.sm_root);
-		    ss != NULL; ss = AVL_NEXT(&msp->ms_map.sm_root, ss)) {
-			uint64_t seg_size = ss->ss_end - ss->ss_start;
-			if (seg_size < min_size)
-				continue;
-			iter->vi_segments[idx].vfs_offset = ss->ss_start;
-			iter->vi_segments[idx].vfs_size = seg_size;
-			idx++;
-		}
+	ASSERT(MUTEX_HELD(&msp->ms_lock));
+	ASSERT(msp->ms_map.sm_loaded);
 
-		if (order == VAB_ITER_ORDER_SIZE)
-			metaslab_sort_segments_by_size(iter->vi_segments, iter->vi_count);
+	if (iter->vi_tree == NULL || avl_numnodes(iter->vi_tree) == 0) {
+		iter->vi_exhausted = B_TRUE;
+	} else {
+		space_seg_t *node = (order == VAB_ITER_ORDER_SIZE) ?
+		    avl_last(iter->vi_tree) : avl_first(iter->vi_tree);
+		if (node == NULL)
+			iter->vi_exhausted = B_TRUE;
+		iter->vi_node = node;
 	}
-
-	mutex_exit(&msp->ms_lock);
 
 	*iter_out = iter;
 	return (0);
@@ -1481,10 +1447,31 @@ metaslab_backend_iter_next(vab_iter_t *iter, vab_free_segment_t *segment_out)
 	if (iter == NULL || segment_out == NULL)
 		return (false);
 
-	if (iter->vi_index >= iter->vi_count)
+	if (iter->vi_exhausted)
 		return (false);
 
-	*segment_out = iter->vi_segments[iter->vi_index++];
+	ASSERT(MUTEX_HELD(&iter->vi_msp->ms_lock));
+
+	if (iter->vi_tree == NULL) {
+		iter->vi_exhausted = B_TRUE;
+		return (false);
+	}
+
+	space_seg_t *node = iter->vi_node;
+	if (node == NULL) {
+		iter->vi_exhausted = B_TRUE;
+		return (false);
+	}
+
+	segment_out->vfs_offset = node->ss_start;
+	segment_out->vfs_size = node->ss_end - node->ss_start;
+
+	space_seg_t *next = (iter->vi_order == VAB_ITER_ORDER_SIZE) ?
+	    AVL_PREV(iter->vi_tree, node) : AVL_NEXT(iter->vi_tree, node);
+
+	iter->vi_node = next;
+	if (next == NULL)
+		iter->vi_exhausted = B_TRUE;
 	return (true);
 }
 
@@ -1494,9 +1481,7 @@ metaslab_backend_iter_destroy(vab_iter_t *iter)
 	if (iter == NULL)
 		return;
 
-	size_t alloc_size = sizeof (vab_iter_t) +
-	    (iter->vi_count * sizeof (vab_free_segment_t));
-	kmem_free(iter, alloc_size);
+	kmem_free(iter, sizeof (*iter));
 }
 
 static const vdev_alloc_backend_ops_t metaslab_alloc_backend_ops_impl = {
