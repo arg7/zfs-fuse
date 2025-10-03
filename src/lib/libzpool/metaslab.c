@@ -1442,37 +1442,42 @@ metaslab_backend_iter_create(void *region_handle, vab_iter_order_t order,
 }
 
 static bool
-metaslab_backend_iter_next(vab_iter_t *iter, vab_free_segment_t *segment_out)
+metaslab_backend_iter_next(vab_iter_t *iter)
 {
-	if (iter == NULL || segment_out == NULL)
-		return (false);
+	ASSERT(iter != NULL);
 
 	if (iter->vi_exhausted)
 		return (false);
 
 	ASSERT(MUTEX_HELD(&iter->vi_msp->ms_lock));
-
-	if (iter->vi_tree == NULL) {
-		iter->vi_exhausted = B_TRUE;
-		return (false);
-	}
-
+	ASSERT(iter->vi_tree != NULL);
 	space_seg_t *node = iter->vi_node;
-	if (node == NULL) {
-		iter->vi_exhausted = B_TRUE;
-		return (false);
-	}
-
-	segment_out->vfs_offset = node->ss_start;
-	segment_out->vfs_size = node->ss_end - node->ss_start;
+	ASSERT(node != NULL);
 
 	space_seg_t *next = (iter->vi_order == VAB_ITER_ORDER_SIZE) ?
 	    AVL_PREV(iter->vi_tree, node) : AVL_NEXT(iter->vi_tree, node);
 
 	iter->vi_node = next;
-	if (next == NULL)
+	if (next == NULL) {
 		iter->vi_exhausted = B_TRUE;
+		return (false);
+	}
+
 	return (true);
+}
+
+static const vab_free_segment_t *
+metaslab_backend_iter_get_segment(vab_iter_t *iter)
+{
+	ASSERT(iter != NULL);
+
+	if (iter->vi_exhausted)
+		return (NULL);
+
+	ASSERT(MUTEX_HELD(&iter->vi_msp->ms_lock));
+	ASSERT(iter->vi_node != NULL);
+
+	return (const vab_free_segment_t *)iter->vi_node;
 }
 
 static void
@@ -1492,6 +1497,7 @@ static const vdev_alloc_backend_ops_t metaslab_alloc_backend_ops_impl = {
 	.vab_is_free = metaslab_backend_is_free,
 	.vab_iter_create = metaslab_backend_iter_create,
 	.vab_iter_next = metaslab_backend_iter_next,
+	.vab_iter_get_segment = metaslab_backend_iter_get_segment,
 	.vab_iter_destroy = metaslab_backend_iter_destroy,
 };
 

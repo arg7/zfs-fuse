@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/dmu.h>
+#include <sys/space_map.h>
 
 // =========================================================================
 // Backend Interface
@@ -15,10 +16,19 @@ struct vdev;
 /**
  * @brief Describes a single contiguous free segment.
  */
-typedef struct vab_free_segment {
-    uint64_t vfs_offset; // Starting offset of the free segment
-    uint64_t vfs_size;   // Size of the free segment
-} vab_free_segment_t;
+typedef space_seg_t vab_free_segment_t;
+
+static inline uint64_t
+vab_segment_offset(const vab_free_segment_t *seg)
+{
+    return seg->ss_start;
+}
+
+static inline uint64_t
+vab_segment_size(const vab_free_segment_t *seg)
+{
+    return seg->ss_end - seg->ss_start;
+}
 
 /**
  * @brief Summary statistics describing a region (e.g., a metaslab).
@@ -80,11 +90,20 @@ typedef struct vdev_alloc_backend_ops {
     /**
      * @brief Retrieves the next free segment from an iterator.
      *
-     * @param[in]  iter        The iterator handle.
-     * @param[out] segment_out The structure to fill with segment data.
-     * @return B_TRUE if a segment was found, B_FALSE if the iteration is complete.
+     * @param[in] iter The iterator handle.
+     * @return B_TRUE if the iterator advanced to the next segment, B_FALSE if
+     *         the iteration is complete.
      */
-    bool (*vab_iter_next)(vab_iter_t *iter, vab_free_segment_t *segment_out);
+    bool (*vab_iter_next)(vab_iter_t *iter);
+
+    /**
+     * @brief Retrieves the segment referenced by the iterator.
+     *
+     * @param[in] iter The iterator handle.
+     * @return Pointer to the backend-owned segment description or NULL when
+     *         the iterator is exhausted.
+     */
+    const vab_free_segment_t *(*vab_iter_get_segment)(vab_iter_t *iter);
 
     /**
      * @brief Destroys an iterator and releases its resources.
