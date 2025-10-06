@@ -2379,6 +2379,13 @@ ztest_split_pool(ztest_ds_t *zd, uint64_t id)
 
 }
 
+void debug_wait() {
+    printf("PID %d: Waiting for debugger. Press Enter when ready...\n", getpid());
+    getchar();  // Wait for input
+	raise(SIGTRAP);
+}
+
+
 /*
  * Verify that the metaslab allocator iterator walks the AVL trees in order.
  */
@@ -2386,6 +2393,8 @@ ztest_split_pool(ztest_ds_t *zd, uint64_t id)
 void
 ztest_metaslab_iter(ztest_ds_t *zd, uint64_t id)
 {
+	//debug_wait();
+
 	spa_t *spa = dmu_objset_spa(zd->zd_os);
 	const vdev_alloc_backend_ops_t *ops = metaslab_get_alloc_backend_ops();
 	metaslab_t *msp = NULL;

@@ -241,6 +241,12 @@ metaslab_group_destroy(metaslab_group_t *mg)
 	kmem_free(mg, sizeof (metaslab_group_t));
 }
 
+/*
+  metaslab_group_activate(metaslab_group_t *mg) (lib/libzpool/metaslab.c:245): takes the metaslab group you want to add to its class’s active rotor.
+  The caller must already hold the spa config lock for allocation (SCL_ALLOC, writer). On entry the group should be detached (mg_prev/mg_next NULL)
+  with a non-positive activation count; the helper bumps mg_activation_count, computes a fresh mg_aliquot, and splices the group into the circular
+  active list (mc_rotor)
+*/
 void
 metaslab_group_activate(metaslab_group_t *mg)
 {
@@ -271,7 +277,12 @@ metaslab_group_activate(metaslab_group_t *mg)
 	}
 	mc->mc_rotor = mg;
 }
-
+/*
+  metaslab_group_passivate(metaslab_group_t *mg) (lib/libzpool/metaslab.c:276) decrements the group’s activation count while holding the config writer
+  lock. If the count stays nonzero the group remains inactive-once but still detached (sanity checks ensure it never touched the rotor). When the count
+  drops to zero it removes the group from the class’s circular rotor list, updates mc_rotor to the next group (or clears it if this was the last one),
+  and nulls out mg_prev/mg_next so the group is fully passivated.
+*/
 void
 metaslab_group_passivate(metaslab_group_t *mg)
 {
@@ -1606,7 +1617,21 @@ metaslab_group_alloc(metaslab_group_t *mg, uint64_t size, uint64_t txg,
 
 /*
  * Allocate a block for the specified i/o.
+ 
+ metaslab_alloc_dva() Params:
+  - spa_t *spa: active storage pool; allocator uses it for config locking, top-level vdev layout, and replication limits.
+  - metaslab_class_t *mc: metaslab class (normal/log/special/etc.) that restricts which metaslab groups can satisfy this allocation.
+  - uint64_t psize: physical size requested on disk; allocator must find free space at least this large and may gang if it cannot.
+  - dva_t *dva: caller-provided DVA array (usually blkptr_t->blk_dva); the function fills in element d.
+  - int d: index within dva[] for this copy (0, 1, or 2 for ditto blocks).
+  - dva_t *hintdva: optional hint DVA array (often from a hint block pointer); guides placement or avoidance depending on flags.
+  - uint64_t txg: target transaction group; identifies when the block will be born and selects the per-txg alloc/dirty tracking structures.
+  - int flags: allocation modifiers controlling hint handling and gang-header behavior (e.g., METASLAB_HINTBP_FAVOR, METASLAB_HINTBP_AVOID,
+  METASLAB_GANG_HEADER).
+  - dmu_object_type_t obj_type: DMU object type of the data being written; recorded for accounting and bias heuristics.
+  - zio_t *zio: I/O context; may be NULL, but when present supplies bias-ops callbacks (io_alloc_bias_ops/key) that influence metaslab selection.
  */
+
 static int
 metaslab_alloc_dva(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
     dva_t *dva, int d, dva_t *hintdva, uint64_t txg, int flags,
@@ -2049,6 +2074,25 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva, uint64_t txg)
 
 	return (0);
 }
+
+/*
+metaslab_alloc args:
+- spa_t *spa – storage pool to allocate from; provides access to config locking, vdev topology, and max replication limits used during allocation.
+  - metaslab_class_t *mc – metaslab class (normal/log/special/etc.) that scopes which top-level vdev groups the allocator will consider.
+  - uint64_t psize – on-disk size to reserve; the allocator uses it to choose a free run of at least this many bytes and to decide when to gang.
+  - blkptr_t *bp – block pointer to be populated; its blk_dva[] entries are filled in-place as DVAs are assigned.
+  - int ndvas – number of DVAs (copies) to allocate; loop bound for allocating each mirror/ditto copy and validated against pool replication limits.
+  - uint64_t txg – transaction group that will “birth” the block; txg==0 is treated as a dry run and skips dirtying metaslab state (lib/libzpool/
+  metaslab.c:2017).
+  - blkptr_t *hintbp – optional hint block pointer; when supplied its DVAs steer placement (e.g., keep a gang block’s children near its header or avoid
+  a prior location); callers may pass NULL when no hint is available.
+  - int flags – hint behavior flags; currently METASLAB_HINTBP_FAVOR (default), METASLAB_HINTBP_AVOID, and METASLAB_GANG_HEADER control how hintbp is
+  interpreted when selecting metaslab groups.
+  - dmu_object_type_t obj_type – DMU object type for the allocation; recorded in space maps and used by bias engines or debugging output to distinguish
+  allocation patterns.
+  - zio_t *zio – the I/O initiating the request; can be NULL, but when present supplies allocation-bias callbacks and context so policy modules can
+  influence metaslab selection.
+*/
 
 int
 metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
