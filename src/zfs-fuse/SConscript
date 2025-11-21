@@ -6,6 +6,6 @@ ccflags = Split('-D_KERNEL')
 
 libs = Split('rt pthread fuse dl z aio crypto tirpc')
 # use static AIO library.  Yes, you have to have double up the ".a"
-libs[libs.index('aio')] = ':libaio.a'
+libs[libs.index('aio')] = ':libaio.a.a'
 
 env.Program('zfs-fuse', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs, CCFLAGS = env['CCFLAGS'] + ccflags)

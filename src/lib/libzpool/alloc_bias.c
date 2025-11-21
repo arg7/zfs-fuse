@@ -303,3 +303,17 @@ ab_alloc_advise(vdev_t *vd, alloc_bias_req_t *req, alloc_bias_hint_t *hint_out)
 
 	return (action);
 }
+
+
+void
+ab_init(void)
+{
+	ab_engine_tree_init();
+	alloc_bias_sequential_init();
+}
+
+void
+ab_fini(void)
+{
+	alloc_bias_sequential_fini();
+}

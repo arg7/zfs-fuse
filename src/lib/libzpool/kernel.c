@@ -37,6 +37,7 @@
 #include <sys/zmod.h>
 #include <sys/utsname.h>
 #include <sys/systeminfo.h>
+#include <sys/alloc_bias.h>
 
 /*
  * Emulation of kernel services in userland.
@@ -816,6 +817,8 @@ kernel_init(int mode)
 
 	system_taskq_init();
 
+	ab_init();
+
 	spa_init(mode);
 }
 
@@ -823,6 +826,8 @@ void
 kernel_fini(void)
 {
 	spa_fini();
+
+	ab_fini();
 
 	system_taskq_fini();
 

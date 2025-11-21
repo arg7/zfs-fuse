@@ -166,4 +166,16 @@ alloc_bias_action_t ab_alloc_advise(struct vdev *vd, alloc_bias_req_t *req,
 
 const vdev_alloc_backend_ops_t *ab_get_backend_ops(void);
 
+/* Global initialization/finalization */
+void ab_init(void);
+void ab_fini(void);
+
+/* Built-in engine initialization */
+void alloc_bias_sequential_init(void);
+void alloc_bias_sequential_fini(void);
+
+#ifdef	__cplusplus
+}
+#endif
+
 #endif /* _SYS_ALLOC_BIAS_H */
