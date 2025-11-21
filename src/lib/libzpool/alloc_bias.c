@@ -3,6 +3,10 @@
 #include <sys/alloc_bias_backend.h>
 #include <sys/metaslab.h>
 #include <sys/vdev_impl.h>
+#include <sys/dsl_dataset.h>
+#include <sys/dsl_prop.h>
+#include <sys/dsl_dir.h>
+#include <sys/dmu_objset.h>
 
 typedef struct ab_engine_node {
 	avl_node_t		abn_node;
@@ -223,4 +227,79 @@ const vdev_alloc_backend_ops_t *
 ab_get_backend_ops(void)
 {
 	return (metaslab_get_alloc_backend_ops());
+}
+
+static const char *
+ab_get_strategy(vdev_t *vd, alloc_bias_req_t *req)
+{
+	zio_t *zio = req->abr_io_req;
+	dsl_pool_t *dp;
+	dsl_dataset_t *ds;
+	static char strategy[ZAP_MAXVALUELEN];
+	int err;
+
+	if (zio == NULL || zio->io_bookmark.zb_objset == DMU_META_OBJSET)
+		return ("default");
+
+	dp = spa_get_dsl(zio->io_spa);
+	if (dp == NULL)
+		return ("default");
+
+	err = dsl_dataset_hold_obj(dp, zio->io_bookmark.zb_objset, FTAG, &ds);
+	if (err)
+		return ("default");
+
+	err = dsl_prop_get_ds(ds, "allocation:strategy", 1, sizeof (strategy),
+	    strategy, NULL);
+	dsl_dataset_rele(ds, FTAG);
+
+	if (err)
+		return ("default");
+
+	return (strategy);
+}
+
+alloc_bias_action_t
+ab_alloc_advise(vdev_t *vd, alloc_bias_req_t *req, alloc_bias_hint_t *hint_out)
+{
+	const char *strategy;
+	alloc_bias_ops_t *ops;
+	alloc_bias_context_t *ctx;
+	alloc_bias_action_t action;
+	uint64_t stream_id;
+	uint64_t key = 0;
+
+	strategy = ab_get_strategy(vd, req);
+	if (strcmp(strategy, "default") == 0)
+		return (BIAS_ACTION_FALLBACK);
+
+	ops = ab_find_engine_by_name(strategy);
+	if (ops == NULL)
+		return (BIAS_ACTION_FALLBACK);
+
+	if (ops->abo_filter_req_fn && !ops->abo_filter_req_fn(req))
+		return (BIAS_ACTION_FALLBACK);
+
+	stream_id = ops->abo_get_stream_id_fn(req);
+
+	if (req->abr_io_req)
+		key = ((zio_t *)req->abr_io_req)->io_alloc_bias_key;
+
+	mutex_enter(&vd->vdev_alloc_bias_lock);
+	ctx = ab_context_lookup(vd, ops, key, stream_id);
+
+	action = ops->abo_advise_alloc_fn(&ctx, req);
+
+	if (action == BIAS_ACTION_ALLOC_FROM_HINT) {
+		if (ctx != NULL && ops->abo_get_hint_fn != NULL) {
+			if (ops->abo_get_hint_fn(ctx, hint_out) != 0)
+				action = BIAS_ACTION_FALLBACK;
+		} else {
+			action = BIAS_ACTION_FALLBACK;
+		}
+	}
+
+	mutex_exit(&vd->vdev_alloc_bias_lock);
+
+	return (action);
 }

@@ -161,6 +161,9 @@ alloc_bias_context_t *ab_context_lookup(struct vdev *vd,
 void ab_context_insert(struct vdev *vd, alloc_bias_context_t *ctx);
 void ab_context_remove(struct vdev *vd, alloc_bias_context_t *ctx);
 
+alloc_bias_action_t ab_alloc_advise(struct vdev *vd, alloc_bias_req_t *req,
+    alloc_bias_hint_t *hint_out);
+
 const vdev_alloc_backend_ops_t *ab_get_backend_ops(void);
 
 #endif /* _SYS_ALLOC_BIAS_H */

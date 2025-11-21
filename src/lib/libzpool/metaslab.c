@@ -30,6 +30,7 @@
 #include <sys/metaslab_impl.h>
 #include <sys/vdev_impl.h>
 #include <sys/zio.h>
+#include <sys/alloc_bias.h>
 #include <sys/alloc_bias_backend.h>
 
 #include <sys/dmu_objset.h>
@@ -1717,6 +1718,36 @@ top:
 		ASSERT(mg->mg_activation_count == 1);
 
 		vd = mg->mg_vd;
+
+		if (zio != NULL) {
+			alloc_bias_req_t ab_req;
+			alloc_bias_hint_t ab_hint;
+			alloc_bias_action_t ab_action;
+
+			ab_req.abr_io_req = zio;
+			ab_req.abr_size = psize;
+			ab_req.abr_vdev = vd;
+			ab_req.abr_backend_hint = NULL;
+
+			ab_action = ab_alloc_advise(vd, &ab_req, &ab_hint);
+
+			if (ab_action == BIAS_ACTION_ALLOC_FROM_HINT) {
+				metaslab_t *msp = ab_hint.abh_region_handle;
+				if (msp->ms_group->mg_vd == vd) {
+					asize = vdev_psize_to_asize(vd, psize);
+					offset = metaslab_alloc_from_hint(msp,
+					    ab_hint.abh_offset, asize, txg, obj_type);
+					if (offset != -1ULL) {
+						DVA_SET_VDEV(&dva[d], vd->vdev_id);
+						DVA_SET_OFFSET(&dva[d], offset);
+						DVA_SET_ASIZE(&dva[d], asize);
+						mc->mc_rotor = mg;
+						mc->mc_aliquot = 0;
+						return (0);
+					}
+				}
+			}
+		}
 
 		/*
 		 * Don't allocate from faulted devices.
