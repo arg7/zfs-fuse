@@ -32,6 +32,11 @@
 #include <sys/nvpair_impl.h>
 #include <rpc/types.h>
 #include <rpc/xdr.h>
+#include <rpc/xdr_inline.h>
+
+#define xdr_char xdr_int8_t
+#define xdr_short xdr_int16_t
+#define xdr_u_short xdr_uint16_t
 
 #if defined(_KERNEL) && !defined(_BOOT)
 #include <sys/varargs.h>
