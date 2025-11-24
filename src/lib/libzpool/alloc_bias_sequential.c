@@ -184,5 +184,5 @@ alloc_bias_sequential_init(void)
 void
 alloc_bias_sequential_fini(void)
 {
-	ab_deregister_engine("sequential");
+	ab_deregister_engine(&seq_bias_ops);
 }
