@@ -62,6 +62,11 @@ typedef enum {
  * the property table in usr/src/common/zfs/zfs_prop.c.
  */
 typedef enum {
+	ZFS_ALLOC_STRATEGY_LEGACY = 0,
+	ZFS_ALLOC_STRATEGY_LBA = 1
+} zfs_alloc_strategy_t;
+
+typedef enum {
 	ZFS_PROP_TYPE,
 	ZFS_PROP_CREATION,
 	ZFS_PROP_USED,
@@ -120,6 +125,7 @@ typedef enum {
 	ZFS_PROP_OBJSETID,		/* not exposed to the user */
 	ZFS_PROP_DEDUP,
 	ZFS_PROP_MLSLABEL,
+	ZFS_PROP_ALLOC_STRATEGY,
 	ZFS_NUM_PROPS
 } zfs_prop_t;
 
