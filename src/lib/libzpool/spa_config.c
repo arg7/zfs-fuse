@@ -178,6 +178,9 @@ spa_config_write(spa_config_dirent_t *dp, nvlist_t *nvl)
 		    0, RLIM64_INFINITY, kcred, NULL) == 0 &&
 		    VOP_FSYNC(vp, FSYNC, kcred, NULL) == 0) {
 			(void) vn_rename(temp, dp->scd_path, UIO_SYSSPACE);
+			(void) printf("spa_config_write: wrote config to %s\n", dp->scd_path);
+		} else {
+			(void) printf("spa_config_write: failed to write config to %s\n", dp->scd_path);
 		}
 		(void) VOP_CLOSE(vp, oflags, 1, 0, kcred, NULL);
 		VN_RELE(vp);

@@ -4879,6 +4879,13 @@ ztest_run_zdb(char *pool)
 	if (zopt_verbose >= 5)
 		(void) printf("Executing %s\n", strstr(zdb, "zdb "));
 
+	struct stat64 s;
+	if (stat64(spa_config_path, &s) != 0) {
+		(void) printf("ztest: cache file '%s' not found (errno=%d)\n", spa_config_path, errno);
+	} else {
+		(void) printf("ztest: cache file '%s' exists, size=%lld\n", spa_config_path, (long long)s.st_size);
+	}
+
 	fp = popen(zdb, "r");
 
 	while (fgets(zbuf, sizeof (zbuf), fp) != NULL)
