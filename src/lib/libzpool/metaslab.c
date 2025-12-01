@@ -30,6 +30,8 @@
 #include <sys/metaslab_impl.h>
 #include <sys/vdev_impl.h>
 #include <sys/zio.h>
+#include <sys/spa_impl.h>
+
 
 uint64_t metaslab_aliquot = 512ULL << 10;
 uint64_t metaslab_gang_bang = SPA_MAXBLOCKSIZE + 1;	/* force gang blocks */
@@ -1512,8 +1514,9 @@ metaslab_claim_dva(spa_t *spa, const dva_t *dva, uint64_t txg)
 }
 
 int
-metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
-    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags)
+metaslab_legacy_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
+    blkptr_t *bp, int ndvas, uint64_t txg, blkptr_t *hintbp, int flags,
+    metaslab_alloc_ctx_t *ctx)
 {
 	dva_t *dva = bp->blk_dva;
 	dva_t *hintdva = hintbp->blk_dva;
@@ -1556,7 +1559,7 @@ metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
 }
 
 void
-metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg, boolean_t now)
+metaslab_legacy_free(spa_t *spa, const blkptr_t *bp, uint64_t txg, boolean_t now)
 {
 	const dva_t *dva = bp->blk_dva;
 	int ndvas = BP_GET_NDVAS(bp);
@@ -1573,7 +1576,7 @@ metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg, boolean_t now)
 }
 
 int
-metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
+metaslab_legacy_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
 {
 	const dva_t *dva = bp->blk_dva;
 	int ndvas = BP_GET_NDVAS(bp);
@@ -1601,4 +1604,88 @@ metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
 	ASSERT(error == 0 || txg == 0);
 
 	return (error);
+}
+
+/*
+ * LBA Allocator Stubs (for now, just call legacy)
+ */
+int
+metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
+    blkptr_t *bp, int ndvas, uint64_t txg, blkptr_t *hintbp, int flags,
+    metaslab_alloc_ctx_t *ctx)
+{
+	return (metaslab_legacy_alloc(spa, mc, psize, bp, ndvas, txg, hintbp,
+	    flags, ctx));
+}
+
+void
+metaslab_lba_free(spa_t *spa, const blkptr_t *bp, uint64_t txg, boolean_t now)
+{
+	metaslab_legacy_free(spa, bp, txg, now);
+}
+
+int
+metaslab_lba_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
+{
+	return (metaslab_legacy_claim(spa, bp, txg));
+}
+
+static metaslab_ops_t metaslab_ops_legacy = {
+	"legacy",
+	metaslab_legacy_alloc,
+	metaslab_legacy_free,
+	metaslab_legacy_claim,
+	NULL,
+	NULL
+};
+
+static metaslab_ops_t metaslab_ops_lba = {
+	"lba",
+	metaslab_lba_alloc,
+	metaslab_lba_free,
+	metaslab_lba_claim,
+	NULL,
+	NULL
+};
+
+static metaslab_ops_t *
+metaslab_get_ops(spa_t *spa)
+{
+	uint64_t strategy = ZFS_ALLOC_STRATEGY_LEGACY;
+
+	if (spa->spa_root_vdev) {
+		mutex_enter(&spa->spa_props_lock);
+		if (spa->spa_config) {
+			(void) nvlist_lookup_uint64(spa->spa_config,
+			    zpool_prop_to_name(ZPOOL_PROP_ALLOC_STRATEGY),
+			    &strategy);
+		}
+		mutex_exit(&spa->spa_props_lock);
+	}
+
+	if (strategy == ZFS_ALLOC_STRATEGY_LBA)
+		return (&metaslab_ops_lba);
+	
+	return (&metaslab_ops_legacy);
+}
+
+int
+metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize, blkptr_t *bp,
+    int ndvas, uint64_t txg, blkptr_t *hintbp, int flags,
+    metaslab_alloc_ctx_t *ctx)
+{
+	return (metaslab_get_ops(spa)->msop_alloc(spa, mc, psize, bp, ndvas,
+	    txg, hintbp, flags, ctx));
+}
+
+void
+metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg, boolean_t now)
+{
+	metaslab_get_ops(spa)->msop_free(spa, bp, txg, now);
+}
+
+int
+metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
+{
+	return (metaslab_get_ops(spa)->msop_claim(spa, bp, txg));
 }

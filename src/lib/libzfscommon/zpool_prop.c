@@ -112,6 +112,16 @@ zpool_prop_init(void)
 	    ZIO_FAILURE_MODE_WAIT, PROP_DEFAULT, ZFS_TYPE_POOL,
 	    "wait | continue | panic", "FAILMODE", failuremode_table);
 
+	static zprop_index_t alloc_strategy_table[] = {
+		{ "legacy",	ZFS_ALLOC_STRATEGY_LEGACY },
+		{ "lba",	ZFS_ALLOC_STRATEGY_LBA },
+		{ NULL }
+	};
+
+	register_index(ZPOOL_PROP_ALLOC_STRATEGY, "alloc_strategy",
+	    ZFS_ALLOC_STRATEGY_LEGACY, PROP_DEFAULT, ZFS_TYPE_POOL,
+	    "legacy | lba", "ALLOC_STRATEGY", alloc_strategy_table);
+
 	/* hidden properties */
 	register_hidden(ZPOOL_PROP_NAME, "name", PROP_TYPE_STRING,
 	    PROP_READONLY, ZFS_TYPE_POOL, "NAME");

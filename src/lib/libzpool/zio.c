@@ -537,6 +537,11 @@ zio_create(zio_t *pio, spa_t *spa, uint64_t txg, const blkptr_t *bp,
 	zio->io_orig_stage = zio->io_stage = stage;
 	zio->io_orig_pipeline = zio->io_pipeline = pipeline;
 
+	zio->io_uid = getuid();
+	zio->io_gid = getgid();
+	zio->io_pid = getpid();
+	zio->io_pgid = getpgrp();
+
 	zio->io_state[ZIO_WAIT_READY] = (stage >= ZIO_STAGE_READY);
 	zio->io_state[ZIO_WAIT_DONE] = (stage >= ZIO_STAGE_DONE);
 
@@ -1673,10 +1678,17 @@ zio_write_gang_block(zio_t *pio)
 	int gbh_copies = MIN(copies + 1, spa_max_replication(spa));
 	zio_prop_t zp;
 	int error;
+	metaslab_alloc_ctx_t ctx;
+
+	ctx.mac_uid = pio->io_uid;
+	ctx.mac_gid = pio->io_gid;
+	ctx.mac_pid = pio->io_pid;
+	ctx.mac_pgid = pio->io_pgid;
+	ctx.mac_obj_type = DMU_OT_NONE;
 
 	error = metaslab_alloc(spa, spa_normal_class(spa), SPA_GANGBLOCKSIZE,
 	    bp, gbh_copies, txg, pio == gio ? NULL : gio->io_bp,
-	    METASLAB_HINTBP_FAVOR | METASLAB_GANG_HEADER);
+	    METASLAB_HINTBP_FAVOR | METASLAB_GANG_HEADER, &ctx);
 	if (error) {
 		pio->io_error = error;
 		return (ZIO_PIPELINE_CONTINUE);
@@ -2111,6 +2123,7 @@ zio_dva_allocate(zio_t *zio)
 	metaslab_class_t *mc = spa_normal_class(spa);
 	blkptr_t *bp = zio->io_bp;
 	int error;
+	metaslab_alloc_ctx_t ctx;
 
 	if (zio->io_gang_leader == NULL) {
 		ASSERT(zio->io_child_type > ZIO_CHILD_GANG);
@@ -2123,8 +2136,14 @@ zio_dva_allocate(zio_t *zio)
 	ASSERT3U(zio->io_prop.zp_copies, <=, spa_max_replication(spa));
 	ASSERT3U(zio->io_size, ==, BP_GET_PSIZE(bp));
 
+	ctx.mac_uid = zio->io_uid;
+	ctx.mac_gid = zio->io_gid;
+	ctx.mac_pid = zio->io_pid;
+	ctx.mac_pgid = zio->io_pgid;
+	ctx.mac_obj_type = zio->io_prop.zp_type;
+
 	error = metaslab_alloc(spa, mc, zio->io_size, bp,
-	    zio->io_prop.zp_copies, zio->io_txg, NULL, 0);
+	    zio->io_prop.zp_copies, zio->io_txg, NULL, 0, &ctx);
 
 	if (error) {
 		if (error == ENOSPC && zio->io_size > SPA_MINBLOCKSIZE)
@@ -2185,16 +2204,23 @@ zio_alloc_zil(spa_t *spa, uint64_t txg, blkptr_t *new_bp, blkptr_t *old_bp,
     uint64_t size, boolean_t use_slog)
 {
 	int error = 1;
+	metaslab_alloc_ctx_t ctx;
 
 	ASSERT(txg > spa_syncing_txg(spa));
 
+	ctx.mac_uid = getuid();
+	ctx.mac_gid = getgid();
+	ctx.mac_pid = getpid();
+	ctx.mac_pgid = getpgrp();
+	ctx.mac_obj_type = DMU_OT_INTENT_LOG;
+
 	if (use_slog)
 		error = metaslab_alloc(spa, spa_log_class(spa), size,
-		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID);
+		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID, &ctx);
 
 	if (error)
 		error = metaslab_alloc(spa, spa_normal_class(spa), size,
-		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID);
+		    new_bp, 1, txg, old_bp, METASLAB_HINTBP_AVOID, &ctx);
 
 	if (error == 0) {
 		BP_SET_LSIZE(new_bp, size);

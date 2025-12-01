@@ -125,7 +125,6 @@ typedef enum {
 	ZFS_PROP_OBJSETID,		/* not exposed to the user */
 	ZFS_PROP_DEDUP,
 	ZFS_PROP_MLSLABEL,
-	ZFS_PROP_ALLOC_STRATEGY,
 	ZFS_NUM_PROPS
 } zfs_prop_t;
 
@@ -165,6 +164,7 @@ typedef enum {
 	ZPOOL_PROP_FREE,
 	ZPOOL_PROP_ALLOCATED,
 	ZPOOL_PROP_ASHIFT,
+	ZPOOL_PROP_ALLOC_STRATEGY,
 	ZPOOL_NUM_PROPS
 } zpool_prop_t;
 

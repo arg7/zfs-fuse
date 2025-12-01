@@ -383,6 +383,12 @@ struct zio {
 	uint64_t	io_size;
 	uint64_t	io_orig_size;
 
+	/* User context */
+	uint64_t	io_uid;
+	uint64_t	io_gid;
+	uint64_t	io_pid;
+	uint64_t	io_pgid;
+
 	/* Stuff for the vdev stack */
 	vdev_t		*io_vd;
 	void		*io_vsd;

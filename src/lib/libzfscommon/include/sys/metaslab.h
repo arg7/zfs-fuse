@@ -49,8 +49,38 @@ extern void metaslab_sync_reassess(metaslab_group_t *mg);
 #define	METASLAB_HINTBP_AVOID	0x1
 #define	METASLAB_GANG_HEADER	0x2
 
+typedef struct metaslab_alloc_ctx {
+	/* User Space Context */
+	uint64_t mac_uid;	/* User ID */
+	uint64_t mac_gid;	/* Group ID */
+	uint64_t mac_pid;	/* Process ID */
+	uint64_t mac_pgid;	/* Process Group ID */
+
+	/* I/O Context */
+	dmu_object_type_t mac_obj_type; /* ZIO Object Type */
+} metaslab_alloc_ctx_t;
+
+typedef struct metaslab_ops {
+	const char *msop_name;
+
+	/* Allocation */
+	int (*msop_alloc)(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
+	    blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp,
+	    int flags, metaslab_alloc_ctx_t *ctx);
+
+	/* Frees & Claims */
+	void (*msop_free)(spa_t *spa, const blkptr_t *bp, uint64_t txg,
+	    boolean_t now);
+	int (*msop_claim)(spa_t *spa, const blkptr_t *bp, uint64_t txg);
+
+	/* Syncing */
+	void (*msop_sync)(metaslab_t *msp, uint64_t txg);
+	void (*msop_sync_done)(metaslab_t *msp, uint64_t txg);
+} metaslab_ops_t;
+
 extern int metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp, int flags);
+    blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp, int flags,
+    metaslab_alloc_ctx_t *ctx);
 extern void metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg,
     boolean_t now);
 extern int metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg);
