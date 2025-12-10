@@ -3001,18 +3001,18 @@ ztest_dmu_snapshot_create_destroy(ztest_ds_t *zd, uint64_t id)
 void
 ztest_dsl_dataset_cleanup(char *osname, uint64_t id)
 {
-	char snap1name[MAXNAMELEN];
-	char clone1name[MAXNAMELEN];
-	char snap2name[MAXNAMELEN];
-	char clone2name[MAXNAMELEN];
-	char snap3name[MAXNAMELEN];
+	char snap1name[MAXNAMELEN + 256];
+	char clone1name[MAXNAMELEN + 256];
+	char snap2name[MAXNAMELEN + 512];
+	char clone2name[MAXNAMELEN + 256];
+	char snap3name[MAXNAMELEN + 512];
 	int error;
 
-	(void) snprintf(snap1name, MAXNAMELEN, "%s@s1_" FU64, osname, id);
-	(void) snprintf(clone1name, MAXNAMELEN, "%s/c1_" FU64, osname, id);
-	(void) snprintf(snap2name, MAXNAMELEN, "%s@s2_" FU64, clone1name, id);
-	(void) snprintf(clone2name, MAXNAMELEN, "%s/c2_" FU64, osname, id);
-	(void) snprintf(snap3name, MAXNAMELEN, "%s@s3_" FU64, clone1name, id);
+	(void) snprintf(snap1name, MAXNAMELEN + 256, "%s@s1_" FU64, osname, id);
+	(void) snprintf(clone1name, MAXNAMELEN + 256, "%s/c1_" FU64, osname, id);
+	(void) snprintf(snap2name, MAXNAMELEN + 512, "%s@s2_" FU64, clone1name, id);
+	(void) snprintf(clone2name, MAXNAMELEN + 256, "%s/c2_" FU64, osname, id);
+	(void) snprintf(snap3name, MAXNAMELEN + 512, "%s@s3_" FU64, clone1name, id);
 
 	error = dmu_objset_destroy(clone2name, B_FALSE);
 	if (error && error != ENOENT)
@@ -3040,11 +3040,11 @@ ztest_dsl_dataset_promote_busy(ztest_ds_t *zd, uint64_t id)
 	ztest_shared_t *zs = ztest_shared;
 	objset_t *clone;
 	dsl_dataset_t *ds;
-	char snap1name[MAXNAMELEN];
-	char clone1name[MAXNAMELEN];
-	char snap2name[MAXNAMELEN];
-	char clone2name[MAXNAMELEN];
-	char snap3name[MAXNAMELEN];
+	char snap1name[MAXNAMELEN + 256];
+	char clone1name[MAXNAMELEN + 256];
+	char snap2name[MAXNAMELEN + 512];
+	char clone2name[MAXNAMELEN + 256];
+	char snap3name[MAXNAMELEN + 512];
 	char *osname = zd->zd_name;
 	int error;
 
@@ -3052,11 +3052,11 @@ ztest_dsl_dataset_promote_busy(ztest_ds_t *zd, uint64_t id)
 
 	ztest_dsl_dataset_cleanup(osname, id);
 
-	(void) snprintf(snap1name, MAXNAMELEN, "%s@s1_" FU64, osname, id);
-	(void) snprintf(clone1name, MAXNAMELEN, "%s/c1_" FU64, osname, id);
-	(void) snprintf(snap2name, MAXNAMELEN, "%s@s2_" FU64, clone1name, id);
-	(void) snprintf(clone2name, MAXNAMELEN, "%s/c2_" FU64, osname, id);
-	(void) snprintf(snap3name, MAXNAMELEN, "%s@s3_" FU64, clone1name, id);
+	(void) snprintf(snap1name, MAXNAMELEN + 256, "%s@s1_" FU64, osname, id);
+	(void) snprintf(clone1name, MAXNAMELEN + 256, "%s/c1_" FU64, osname, id);
+	(void) snprintf(snap2name, MAXNAMELEN + 512, "%s@s2_" FU64, clone1name, id);
+	(void) snprintf(clone2name, MAXNAMELEN + 256, "%s/c2_" FU64, osname, id);
+	(void) snprintf(snap3name, MAXNAMELEN + 512, "%s@s3_" FU64, clone1name, id);
 
 	error = dmu_objset_snapshot(osname, strchr(snap1name, '@')+1,
 	    NULL, B_FALSE);
@@ -4262,8 +4262,8 @@ ztest_dmu_snapshot_hold(ztest_ds_t *zd, uint64_t id)
 	objset_t *os = zd->zd_os;
 	objset_t *origin;
 	char snapname[100];
-	char fullname[100];
-	char clonename[100];
+	char fullname[MAXNAMELEN + 100];
+	char clonename[MAXNAMELEN + 100];
 	char tag[100];
 	char osname[MAXNAMELEN];
 
@@ -4272,8 +4272,8 @@ ztest_dmu_snapshot_hold(ztest_ds_t *zd, uint64_t id)
 	dmu_objset_name(os, osname);
 
 	(void) snprintf(snapname, 100, "sh1_" FU64, id);
-	(void) snprintf(fullname, 100, "%s@%s", osname, snapname);
-	(void) snprintf(clonename, 100, "%s/ch1_" FU64, osname, id);
+	(void) snprintf(fullname, MAXNAMELEN + 100, "%s@%s", osname, snapname);
+	(void) snprintf(clonename, MAXNAMELEN + 100, "%s/ch1_" FU64, osname, id);
 	(void) snprintf(tag, 100, "tag_" FU64, id);
 
 	/*
@@ -5508,7 +5508,7 @@ main(int argc, char **argv)
 			    "%4.1f%% of %5s used, %3.0f%% done, %8s to go\n",
 			    iters,
 			    WIFEXITED(status) ? "Complete" : "SIGKILL",
-			    zs->zs_enospc_count,
+			    (u_longlong_t)zs->zs_enospc_count,
 			    100.0 * zs->zs_alloc / zs->zs_space,
 			    numbuf,
 			    100.0 * (now - zs->zs_proc_start) /
@@ -5528,7 +5528,7 @@ main(int argc, char **argv)
 				print_time(zi->zi_call_time, timebuf);
 				(void) dladdr((void *)zi->zi_func, &dli);
 				(void) printf("%7llu %9s   %s\n",
-				    zi->zi_call_count, timebuf,
+				    (u_longlong_t)zi->zi_call_count, timebuf,
 				    dli.dli_sname);
 			}
 			(void) printf("\n");

@@ -533,7 +533,6 @@ make_leaf_vdev(nvlist_t *props, const char *arg, uint64_t is_log)
 	}
 
 	/* If the disk is large, assume it is 4K sector size.  */
-#define THRESH_4K (512 * 1024LL*1024*1024)      /* 512 GB */
 #define THRESH_4K (128 * 1024LL*1024)           /* 128 MB for testing */
 	if (ashift == 0) {
 	   if (S_ISBLK(statbuf.st_mode)) { /* If it's a device, get the size. */

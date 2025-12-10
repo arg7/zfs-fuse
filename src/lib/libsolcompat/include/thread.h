@@ -74,8 +74,9 @@ typedef pthread_rwlock_t rwlock_t;
 
 static inline int thr_create(void *stack_base, size_t stack_size, void *(*start_func) (void*), void *arg, long flags, thread_t *new_thread_ID) {
     pthread_t id;
-    if (!new_thread_ID)
+    if (!new_thread_ID) {
 	new_thread_ID = &id;
+    }
 	assert(stack_base == NULL);
 	assert(stack_size == 0);
 	assert((flags & ~THR_BOUND & ~THR_DETACHED) == 0);

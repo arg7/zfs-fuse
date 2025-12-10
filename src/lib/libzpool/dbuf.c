@@ -2286,7 +2286,7 @@ dbuf_write_done(zio_t *zio, arc_buf_t *buf, void *vdb)
 	db->db_dirtycnt -= 1;
 	db->db_data_pending = NULL;
 	dbuf_rele_and_unlock(db, (void *)(uintptr_t)txg);
-	pthread_yield();
+	sched_yield();
 }
 
 static void
