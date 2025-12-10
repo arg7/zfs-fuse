@@ -37,7 +37,7 @@ env['CCFLAGS'] = Split('-pipe -Wall -std=c99 -Wno-switch -Wno-unused -Wno-missin
 if osname == "Linux":
   env.Append(CPPFLAGS = " -DLINUX_AIO")
 
-debug = int(ARGUMENTS.get('debug', '0'))
+debug = int(ARGUMENTS.get('debug', ARGUMENTS.get('DEBUG', '0')))
 optim = ARGUMENTS.get('optim', '-O2')
 
 if not debug:

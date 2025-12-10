@@ -376,3 +376,41 @@ extern unsigned char bcd_to_byte[256];
 #endif
 
 #endif	/* _SYS_SYSMACROS_H */
+
+#ifndef	IS_P2ALIGNED
+#define	IS_P2ALIGNED(v, a) ((((uintptr_t)(v)) & ((uintptr_t)(a) - 1)) == 0)
+#endif
+
+#ifndef	P2ALIGN
+#define	P2ALIGN(x, align)		((x) & -(align))
+#endif
+
+#ifndef	P2PHASE
+#define	P2PHASE(x, align)		((x) & ((align) - 1))
+#endif
+
+#ifndef	P2NPHASE
+#define	P2NPHASE(x, align)		(-(x) & ((align) - 1))
+#endif
+
+#ifndef	P2ROUNDUP
+#define	P2ROUNDUP(x, align)		(-(-(x) & -(align)))
+#endif
+
+#ifndef	P2END
+#define	P2END(x, align)			(-(~(x) & -(align)))
+#endif
+
+#ifndef	P2PHASEUP
+#define	P2PHASEUP(x, align, phase)	((phase) - (((phase) - (x)) & -(align)))
+#endif
+
+#ifndef	P2BOUNDARY
+#define	P2BOUNDARY(off, len, align) \
+	(((off) ^ ((off) + (len) - 1)) > (align) - 1)
+#endif
+
+#ifndef ISP2
+#define	ISP2(x)		(((x) & ((x) - 1)) == 0)
+#endif
+
