@@ -504,6 +504,8 @@ usage(boolean_t requested)
 	exit(requested ? 0 : 1);
 }
 
+static char *zopt_props = NULL;
+
 static void
 process_options(int argc, char **argv)
 {
@@ -514,7 +516,7 @@ process_options(int argc, char **argv)
 	metaslab_gang_bang = 32 << 10;
 
 	while ((opt = getopt(argc, argv,
-	    "v:s:a:m:r:R:d:t:g:i:k:p:f:VET:P:h")) != EOF) {
+	    "v:s:a:m:r:R:d:t:g:i:k:p:f:o:VET:P:h")) != EOF) {
 		value = 0;
 		switch (opt) {
 		case 'v':
@@ -584,6 +586,9 @@ process_options(int argc, char **argv)
 		case 'P':
 			zopt_passtime = MAX(1, value);
 			break;
+		case 'o':
+			zopt_props = strdup(optarg);
+			break;
 		case 'h':
 			usage(B_TRUE);
 			break;
@@ -598,6 +603,37 @@ process_options(int argc, char **argv)
 
 	zopt_vdevtime = (zopt_vdevs > 0 ? zopt_time * NANOSEC / zopt_vdevs :
 	    UINT64_MAX >> 2);
+}
+
+static void
+add_prop(nvlist_t **props, const char *propstr)
+{
+	char *key = strdup(propstr);
+	char *val = strchr(key, '=');
+	uint64_t val64;
+
+	if (val == NULL)
+		fatal(1, "missing value in property '%s'", propstr);
+	*val = '\0';
+	val++;
+
+	if (strcmp(key, "alloc_strategy") == 0) {
+		if (strcmp(val, "lba") == 0)
+			val64 = ZFS_ALLOC_STRATEGY_LBA;
+		else if (strcmp(val, "legacy") == 0)
+			val64 = ZFS_ALLOC_STRATEGY_LEGACY;
+		else
+			fatal(1, "invalid alloc_strategy '%s'", val);
+	} else {
+		fatal(1, "unknown property '%s'", key);
+	}
+
+	if (*props == NULL)
+		VERIFY(nvlist_alloc(props, NV_UNIQUE_NAME, 0) == 0);
+
+	VERIFY(nvlist_add_uint64(*props, key, val64) == 0);
+	(void) printf("Updated prop: %s = %llu\n", key, (u_longlong_t)val64);
+	free(key);
 }
 
 static void
@@ -5354,6 +5390,8 @@ ztest_init(ztest_shared_t *zs)
 	nvroot = make_vdev_root(NULL, NULL, zopt_vdev_size, 0,
 	    0, zopt_raidz, zs->zs_mirrors, 1);
 	props = make_random_props();
+	if (zopt_props)
+		add_prop(&props, zopt_props);
 	VERIFY3U(0, ==, spa_create(zs->zs_pool, nvroot, props, NULL, NULL));
 	nvlist_free(nvroot);
 

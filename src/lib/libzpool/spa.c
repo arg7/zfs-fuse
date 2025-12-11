@@ -599,6 +599,8 @@ spa_activate(spa_t *spa, int mode)
 	spa->spa_state = POOL_STATE_ACTIVE;
 	spa->spa_mode = mode;
 
+	spa->spa_alloc_strategy = ZFS_ALLOC_STRATEGY_LEGACY;
+
 	spa->spa_normal_class = metaslab_class_create(spa, zfs_metaslab_ops);
 	spa->spa_log_class = metaslab_class_create(spa, zfs_metaslab_ops);
 
@@ -2572,6 +2574,23 @@ spa_create(const char *pool, nvlist_t *nvroot, nvlist_t *props,
 		spa_remove(spa);
 		mutex_exit(&spa_namespace_lock);
 		return (error);
+	}
+
+	if (nvlist_lookup_uint64(props, zpool_prop_to_name(ZPOOL_PROP_ALLOC_STRATEGY),
+	    &spa->spa_alloc_strategy) == 0) {
+		/*
+		 * In spa_create, we don't have mos, obj, or tx yet.
+		 * The actual update to persistent storage will happen
+		 * when spa_sync_props is called later.
+		 * For now, just set the in-memory value.
+		 */
+	}
+
+	if (nvlist_lookup_uint64(props, zpool_prop_to_name(ZPOOL_PROP_BOOTFS),
+	    &spa->spa_bootfs) == 0) {
+		/*
+		 * Similar to alloc_strategy, this will be synced later.
+		 */
 	}
 
 	if (nvlist_lookup_uint64(props, zpool_prop_to_name(ZPOOL_PROP_VERSION),

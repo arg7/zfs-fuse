@@ -78,12 +78,21 @@ typedef struct metaslab_ops {
 	void (*msop_sync_done)(metaslab_t *msp, uint64_t txg);
 } metaslab_ops_t;
 
+extern int metaslab_legacy_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
+    blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp, int flags,
+    metaslab_alloc_ctx_t *ctx);
+extern void metaslab_legacy_free(spa_t *spa, const blkptr_t *bp, uint64_t txg,
+    boolean_t now);
+extern int metaslab_legacy_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg);
+
 extern int metaslab_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
     blkptr_t *bp, int ncopies, uint64_t txg, blkptr_t *hintbp, int flags,
     metaslab_alloc_ctx_t *ctx);
 extern void metaslab_free(spa_t *spa, const blkptr_t *bp, uint64_t txg,
     boolean_t now);
 extern int metaslab_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg);
+extern int metaslab_activate(metaslab_t *msp, uint64_t activation_weight, uint64_t size);
+extern void metaslab_free_dva(spa_t *spa, const dva_t *dva, uint64_t txg, boolean_t now);
 
 extern metaslab_class_t *metaslab_class_create(spa_t *spa,
     space_map_ops_t *ops);

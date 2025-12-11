@@ -27,6 +27,7 @@
 #include <sys/dmu.h>
 #include <sys/dmu_tx.h>
 #include <sys/space_map.h>
+#include <sys/zap.h>
 #include <sys/metaslab_impl.h>
 #include <sys/vdev_impl.h>
 #include <sys/zio.h>
@@ -845,7 +846,7 @@ metaslab_prefetch(metaslab_group_t *mg)
 	mutex_exit(&mg->mg_lock);
 }
 
-static int
+int
 metaslab_activate(metaslab_t *msp, uint64_t activation_weight, uint64_t size)
 {
 	metaslab_group_t *mg = msp->ms_group;
@@ -1418,7 +1419,7 @@ next:
  * Free the block represented by DVA in the context of the specified
  * transaction group.
  */
-static void
+void
 metaslab_free_dva(spa_t *spa, const dva_t *dva, uint64_t txg, boolean_t now)
 {
 	uint64_t vdev = DVA_GET_VDEV(dva);
@@ -1606,31 +1607,7 @@ metaslab_legacy_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
 	return (error);
 }
 
-/*
- * LBA Allocator Stubs (for now, just call legacy)
- */
-int
-metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
-    blkptr_t *bp, int ndvas, uint64_t txg, blkptr_t *hintbp, int flags,
-    metaslab_alloc_ctx_t *ctx)
-{
-	return (metaslab_legacy_alloc(spa, mc, psize, bp, ndvas, txg, hintbp,
-	    flags, ctx));
-}
-
-void
-metaslab_lba_free(spa_t *spa, const blkptr_t *bp, uint64_t txg, boolean_t now)
-{
-	metaslab_legacy_free(spa, bp, txg, now);
-}
-
-int
-metaslab_lba_claim(spa_t *spa, const blkptr_t *bp, uint64_t txg)
-{
-	return (metaslab_legacy_claim(spa, bp, txg));
-}
-
-static metaslab_ops_t metaslab_ops_legacy = {
+metaslab_ops_t metaslab_ops_legacy = {
 	"legacy",
 	metaslab_legacy_alloc,
 	metaslab_legacy_free,
@@ -1639,32 +1616,19 @@ static metaslab_ops_t metaslab_ops_legacy = {
 	NULL
 };
 
-static metaslab_ops_t metaslab_ops_lba = {
-	"lba",
-	metaslab_lba_alloc,
-	metaslab_lba_free,
-	metaslab_lba_claim,
-	NULL,
-	NULL
-};
+extern metaslab_ops_t metaslab_ops_lba;
 
 static metaslab_ops_t *
 metaslab_get_ops(spa_t *spa)
 {
-	uint64_t strategy = ZFS_ALLOC_STRATEGY_LEGACY;
-
-	if (spa->spa_root_vdev) {
-		mutex_enter(&spa->spa_props_lock);
-		if (spa->spa_config) {
-			(void) nvlist_lookup_uint64(spa->spa_config,
-			    zpool_prop_to_name(ZPOOL_PROP_ALLOC_STRATEGY),
-			    &strategy);
-		}
-		mutex_exit(&spa->spa_props_lock);
-	}
-
-	if (strategy == ZFS_ALLOC_STRATEGY_LBA)
+	/*
+	 * Use the cached allocation strategy (loaded/synced in spa.c)
+	 * to avoid expensive ZAP lookups or lock contention in the hot path.
+	 */
+	if (spa->spa_alloc_strategy == ZFS_ALLOC_STRATEGY_LBA) {
+		// fprintf(stderr, "[metaslab] Strategy: LBA\n");
 		return (&metaslab_ops_lba);
+	}
 	
 	return (&metaslab_ops_legacy);
 }
