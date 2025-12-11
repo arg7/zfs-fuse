@@ -45,7 +45,35 @@
 
 #ifdef LBA_DEBUG
 #include <stdio.h>
+#include <sys/time.h>
+#include <time.h>
+
+static void
+lba_log_timestamp(void)
+{
+	static time_t last_sec = 0;
+	struct timeval tv;
+	struct tm tm_info;
+	char buffer[32];
+	
+	gettimeofday(&tv, NULL);
+	localtime_r(&tv.tv_sec, &tm_info);
+	
+	if (tv.tv_sec == last_sec) {
+		/* Same second: only print msec, padded for alignment */
+		/* Format: "hh.mm.ss.msec" -> 13 chars */
+		/* We want to skip "hh.mm.ss" (8 chars) and align the .msec */
+		fprintf(stderr, "        .%03ld ", tv.tv_usec / 1000);
+	} else {
+		/* New second: print full timestamp */
+		strftime(buffer, sizeof(buffer), "%H.%M.%S", &tm_info);
+		fprintf(stderr, "%s.%03ld ", buffer, tv.tv_usec / 1000);
+		last_sec = tv.tv_sec;
+	}
+}
+
 #define	LBA_TRACE(...)	do { \
+	lba_log_timestamp(); \
 	fprintf(stderr, "[LBA] " __VA_ARGS__); \
 	fprintf(stderr, "\n"); \
 } while (0)
@@ -166,7 +194,7 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	int d;
 	boolean_t is_metadata = dmu_ot[ctx->mac_obj_type].ot_metadata;
 
-	fprintf(stderr, "[LBA] metaslab_lba_alloc called\n");
+	LBA_TRACE("metaslab_lba_alloc called");
 
 	ASSERT(bp->blk_birth == 0);
 	ASSERT(BP_PHYSICAL_BIRTH(bp) == 0);
