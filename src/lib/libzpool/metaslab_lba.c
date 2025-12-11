@@ -199,8 +199,10 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	ASSERT(bp->blk_birth == 0);
 	ASSERT(BP_PHYSICAL_BIRTH(bp) == 0);
 
-	LBA_TRACE("Alloc Start: size=%llu type=%d (%s) ndvas=%d hint=%p", 
-	    (u_longlong_t)psize, ctx->mac_obj_type, is_metadata ? "META" : "DATA", ndvas, hintbp);
+	LBA_TRACE("Alloc Start: size=%llu type=%d (%s, %s) ndvas=%d hint=%p", 
+	    (u_longlong_t)psize, ctx->mac_obj_type, 
+	    (ctx->mac_obj_type < DMU_OT_NUMTYPES) ? dmu_ot[ctx->mac_obj_type].ot_name : "UNKNOWN",
+	    is_metadata ? "META" : "DATA", ndvas, hintbp);
 
 	spa_config_enter(spa, SCL_ALLOC, FTAG, RW_READER);
 
