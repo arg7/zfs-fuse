@@ -612,8 +612,10 @@ add_prop(nvlist_t **props, const char *propstr)
 	char *val = strchr(key, '=');
 	uint64_t val64;
 
-	if (val == NULL)
-		fatal(1, "missing value in property '%s'", propstr);
+	if (val == NULL) {
+		(void) fprintf(stderr, "missing value in property '%s'\n", propstr);
+		exit(1);
+	}
 	*val = '\0';
 	val++;
 
@@ -622,10 +624,13 @@ add_prop(nvlist_t **props, const char *propstr)
 			val64 = ZFS_ALLOC_STRATEGY_LBA;
 		else if (strcmp(val, "legacy") == 0)
 			val64 = ZFS_ALLOC_STRATEGY_LEGACY;
-		else
-			fatal(1, "invalid alloc_strategy '%s'", val);
+		else {
+			(void) fprintf(stderr, "invalid alloc_strategy '%s'\n", val);
+			exit(1);
+		}
 	} else {
-		fatal(1, "unknown property '%s'", key);
+		(void) fprintf(stderr, "unknown property '%s'\n", key);
+		exit(1);
 	}
 
 	if (*props == NULL)
