@@ -147,8 +147,8 @@ extern void __assert(const char *, const char *, int);
 	const TYPE __left = (TYPE)(LEFT); \
 	const TYPE __right = (TYPE)(RIGHT); \
 	if (!(__left OP __right) && (!aok)) { \
-		char *__buf = alloca(256); \
-		(void) snprintf(__buf, 256, "%s %s %s (0x%llx %s 0x%llx)", \
+		char *__buf = alloca(2048); \
+		(void) snprintf(__buf, 2048, "%s %s %s (0x%llx %s 0x%llx)", \
 			#LEFT, #OP, #RIGHT, \
 			(u_longlong_t)__left, #OP, (u_longlong_t)__right); \
 		__assert(__buf, __FILE__, __LINE__); \

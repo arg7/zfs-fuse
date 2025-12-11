@@ -73,7 +73,7 @@ def getarch(arch):
 	if arch == 'x86_64':
 		return 'amd64'
 
-	if re.compile('i\d86').match(arch):
+	if re.compile(r'i\d86').match(arch):
 		return 'i386'
 
 	return 'generic'
