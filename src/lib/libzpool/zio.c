@@ -2141,6 +2141,10 @@ zio_dva_allocate(zio_t *zio)
 	ctx.mac_pid = zio->io_pid;
 	ctx.mac_pgid = zio->io_pgid;
 	ctx.mac_obj_type = zio->io_prop.zp_type;
+#ifdef ZFS_DEBUG
+	ctx.mac_objset = zio->io_bookmark.zb_objset;
+	ctx.mac_object = zio->io_bookmark.zb_object;
+#endif
 
 	error = metaslab_alloc(spa, mc, zio->io_size, bp,
 	    zio->io_prop.zp_copies, zio->io_txg, NULL, 0, &ctx);

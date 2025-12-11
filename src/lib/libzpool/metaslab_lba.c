@@ -39,43 +39,46 @@
 
 /*
  * Enable Debug Tracing for LBA
- * Uncomment to enable output to stderr (or change to zfs_dbgmsg for kernel/daemon logs)
+ * Tied to ZFS_DEBUG
  */
+#ifdef ZFS_DEBUG
 #define	LBA_DEBUG 1
+#endif
 
 #ifdef LBA_DEBUG
 #include <stdio.h>
 #include <sys/time.h>
 #include <time.h>
+#include <pthread.h>
 
 static void
-lba_log_timestamp(void)
+lba_get_timestamp(char *buffer, size_t size)
 {
 	static time_t last_sec = 0;
 	struct timeval tv;
 	struct tm tm_info;
-	char buffer[32];
+	char tmp[32];
 	
 	gettimeofday(&tv, NULL);
 	localtime_r(&tv.tv_sec, &tm_info);
 	
 	if (tv.tv_sec == last_sec) {
-		/* Same second: only print msec, padded for alignment */
-		/* Format: "hh.mm.ss.msec" -> 13 chars */
-		/* We want to skip "hh.mm.ss" (8 chars) and align the .msec */
-		fprintf(stderr, "        .%03ld ", tv.tv_usec / 1000);
+		snprintf(buffer, size, "        .%03ld", tv.tv_usec / 1000);
 	} else {
-		/* New second: print full timestamp */
-		strftime(buffer, sizeof(buffer), "%H.%M.%S", &tm_info);
-		fprintf(stderr, "%s.%03ld ", buffer, tv.tv_usec / 1000);
+		strftime(tmp, sizeof(tmp), "%H.%M.%S", &tm_info);
+		snprintf(buffer, size, "%s.%03ld", tmp, tv.tv_usec / 1000);
 		last_sec = tv.tv_sec;
 	}
 }
 
-#define	LBA_TRACE(...)	do { \
-	lba_log_timestamp(); \
-	fprintf(stderr, "[LBA] " __VA_ARGS__); \
-	fprintf(stderr, "\n"); \
+static pthread_mutex_t lba_log_lock = PTHREAD_MUTEX_INITIALIZER;
+
+#define	LBA_TRACE(fmt, ...)	do { \
+	char ts[32]; \
+	lba_get_timestamp(ts, sizeof(ts)); \
+	pthread_mutex_lock(&lba_log_lock); \
+	fprintf(stderr, "%s [LBA] " fmt "\n", ts, ##__VA_ARGS__); \
+	pthread_mutex_unlock(&lba_log_lock); \
 } while (0)
 #else
 #define	LBA_TRACE(...)
@@ -199,10 +202,24 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	ASSERT(bp->blk_birth == 0);
 	ASSERT(BP_PHYSICAL_BIRTH(bp) == 0);
 
-	LBA_TRACE("Alloc Start: size=%llu type=%d (%s, %s) ndvas=%d hint=%p", 
+#ifdef ZFS_DEBUG
+	char objname[64];
+
+	if (ctx->mac_object == DMU_USERUSED_OBJECT)
+		snprintf(objname, sizeof(objname), "USERUSED");
+	else if (ctx->mac_object == DMU_GROUPUSED_OBJECT)
+		snprintf(objname, sizeof(objname), "GROUPUSED");
+	else if (ctx->mac_object == DMU_DEADLIST_OBJECT)
+		snprintf(objname, sizeof(objname), "DEADLIST");
+	else
+		snprintf(objname, sizeof(objname), "%llu", (u_longlong_t)ctx->mac_object);
+
+	LBA_TRACE("Alloc Start: size=%llu type=%d (%s, %s) ndvas=%d hint=%p objset=%llu object=%s", 
 	    (u_longlong_t)psize, ctx->mac_obj_type, 
 	    (ctx->mac_obj_type < DMU_OT_NUMTYPES) ? dmu_ot[ctx->mac_obj_type].ot_name : "UNKNOWN",
-	    is_metadata ? "META" : "DATA", ndvas, hintbp);
+	    is_metadata ? "META" : "DATA", ndvas, hintbp,
+	    (u_longlong_t)ctx->mac_objset, objname);
+#endif
 
 	spa_config_enter(spa, SCL_ALLOC, FTAG, RW_READER);
 

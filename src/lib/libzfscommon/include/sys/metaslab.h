@@ -58,6 +58,11 @@ typedef struct metaslab_alloc_ctx {
 
 	/* I/O Context */
 	dmu_object_type_t mac_obj_type; /* ZIO Object Type */
+#ifdef ZFS_DEBUG
+	uint64_t mac_objset;	/* Objset ID */
+	uint64_t mac_object;	/* Object ID */
+	uint64_t mac_plan_id;	/* Plan ID */
+#endif
 } metaslab_alloc_ctx_t;
 
 typedef struct metaslab_ops {
