@@ -1792,6 +1792,7 @@ spa_load_impl(spa_t *spa, uint64_t pool_guid, nvlist_t *config,
 		spa_prop_find(spa, ZPOOL_PROP_AUTOEXPAND, &spa->spa_autoexpand);
 		spa_prop_find(spa, ZPOOL_PROP_DEDUPDITTO,
 		    &spa->spa_dedup_ditto);
+		spa_prop_find(spa, ZPOOL_PROP_ALLOC_STRATEGY, &spa->spa_alloc_strategy);
 
 		spa->spa_autoreplace = (autoreplace != 0);
 	}
@@ -5033,6 +5034,21 @@ spa_sync_props(void *arg1, void *arg2, cred_t *cr, dmu_tx_t *tx)
 			switch (prop) {
 			case ZPOOL_PROP_DELEGATION:
 				spa->spa_delegation = intval;
+				break;
+			case ZPOOL_PROP_ALLOC_STRATEGY:
+				if (spa->spa_pool_props_object == 0) {
+					VERIFY((spa->spa_pool_props_object =
+					    zap_create(mos, DMU_OT_POOL_PROPS,
+					    DMU_OT_NONE, 0, tx)) > 0);
+
+					VERIFY(zap_update(mos,
+					    DMU_POOL_DIRECTORY_OBJECT, DMU_POOL_PROPS,
+					    8, 1, &spa->spa_pool_props_object, tx)
+					    == 0);
+				}
+				spa->spa_alloc_strategy = intval;
+				VERIFY(zap_update(mos, spa->spa_pool_props_object,
+				    propname, 8, 1, &intval, tx) == 0);
 				break;
 			case ZPOOL_PROP_BOOTFS:
 				spa->spa_bootfs = intval;
