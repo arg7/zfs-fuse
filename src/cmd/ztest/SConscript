@@ -5,5 +5,5 @@ cpppath = Split('#lib/libavl/include #lib/libnvpair/include #lib/libumem/include
 
 libs = Split('m dl rt pthread z aio crypto tirpc')
 
-env.Program('ztest', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs)
+env.Program('ztest', objects, CPPPATH = env['CPPPATH'] + cpppath, LIBS = libs, LINKFLAGS = env['LINKFLAGS'] + ['-rdynamic'])
 env.Depends('ztest', '../zdb/zdb')
