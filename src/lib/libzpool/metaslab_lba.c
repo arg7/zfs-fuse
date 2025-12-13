@@ -50,6 +50,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
 static void
 lba_get_timestamp(char *buffer, size_t size)
@@ -75,9 +76,9 @@ static pthread_mutex_t lba_log_lock = PTHREAD_MUTEX_INITIALIZER;
 
 #define	LBA_TRACE(fmt, ...)	do { \
 	char ts[32]; \
-	lba_get_timestamp(ts, sizeof(ts)); \
 	pthread_mutex_lock(&lba_log_lock); \
-	fprintf(stderr, "%s [LBA] " fmt "\n", ts, ##__VA_ARGS__); \
+	lba_get_timestamp(ts, sizeof(ts)); \
+	fprintf(stderr, "%s [LBA] [PID:%d][TID:%llu] " fmt "\n", ts, getpid(), (u_longlong_t)pthread_self(), ##__VA_ARGS__); \
 	pthread_mutex_unlock(&lba_log_lock); \
 } while (0)
 #else
@@ -124,8 +125,7 @@ metaslab_lba_group_alloc(metaslab_group_t *mg, uint64_t psize, uint64_t txg,
 		step = 1;
 	}
 
-	LBA_TRACE("Group Alloc: vdev=%llu type=%s start=%d end=%d", 
-	    (u_longlong_t)vd->vdev_id, is_metadata ? "META" : "DATA", start, end);
+
 
 	for (i = start; i != end; i += step) {
 		metaslab_t *msp = vd->vdev_ms[i];
@@ -175,14 +175,13 @@ metaslab_lba_group_alloc(metaslab_group_t *mg, uint64_t psize, uint64_t txg,
 			}
 			msp->ms_weight &= ~METASLAB_WEIGHT_PRIMARY; /* clear active flag? logic from legacy */
 			mutex_exit(&msp->ms_lock);
-			LBA_TRACE("Allocated: ms=%d offset=%llu", i, (u_longlong_t)offset);
 			return (offset);
 		}
 		
 		mutex_exit(&msp->ms_lock);
 	}
 
-	LBA_TRACE("Failed to allocate in group vdev=%llu", (u_longlong_t)vd->vdev_id);
+
 	return (-1ULL);
 }
 
@@ -197,29 +196,13 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 	int d;
 	boolean_t is_metadata = dmu_ot[ctx->mac_obj_type].ot_metadata;
 
-	LBA_TRACE("metaslab_lba_alloc called");
+
 
 	ASSERT(bp->blk_birth == 0);
 	ASSERT(BP_PHYSICAL_BIRTH(bp) == 0);
 
-#ifdef ZFS_DEBUG
-	char objname[64];
 
-	if (ctx->mac_object == DMU_USERUSED_OBJECT)
-		snprintf(objname, sizeof(objname), "USERUSED");
-	else if (ctx->mac_object == DMU_GROUPUSED_OBJECT)
-		snprintf(objname, sizeof(objname), "GROUPUSED");
-	else if (ctx->mac_object == DMU_DEADLIST_OBJECT)
-		snprintf(objname, sizeof(objname), "DEADLIST");
-	else
-		snprintf(objname, sizeof(objname), "%llu", (u_longlong_t)ctx->mac_object);
 
-	LBA_TRACE("Alloc Start: size=%llu type=%d (%s, %s) ndvas=%d hint=%p objset=%llu object=%s", 
-	    (u_longlong_t)psize, ctx->mac_obj_type, 
-	    (ctx->mac_obj_type < DMU_OT_NUMTYPES) ? dmu_ot[ctx->mac_obj_type].ot_name : "UNKNOWN",
-	    is_metadata ? "META" : "DATA", ndvas, hintbp,
-	    (u_longlong_t)ctx->mac_objset, objname);
-#endif
 
 	spa_config_enter(spa, SCL_ALLOC, FTAG, RW_READER);
 
@@ -241,12 +224,12 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 			// Respect hint
 			vd = vdev_lookup_top(spa, DVA_GET_VDEV(&hintdva[d]));
 			if (vd && vd->vdev_mg) mg = vd->vdev_mg;
-			LBA_TRACE("Hint Used: dva=%d vdev=%llu", d, (u_longlong_t)(vd ? vd->vdev_id : -1));
+
 		} else if (d == 0) {
 			// First copy: Use rotor
 			mg = mc->mc_rotor;
 			vd = mg->mg_vd;
-			LBA_TRACE("Rotor Used: vdev=%llu", (u_longlong_t)vd->vdev_id);
+
 		} else {
 			// Simultaneous copies: Prefer distinct vdevs
 			// Simple fallback: use rotor->next
@@ -255,7 +238,7 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 			for (int k = 0; k < d; k++) rot = rot->mg_next;
 			mg = rot;
 			vd = mg->mg_vd;
-			LBA_TRACE("Mirror/Copy Used: vdev=%llu", (u_longlong_t)vd->vdev_id);
+
 		}
 
 		if (!mg) {
@@ -282,6 +265,26 @@ metaslab_lba_alloc(spa_t *spa, metaslab_class_t *mc, uint64_t psize,
 				DVA_SET_OFFSET(&dva[d], offset);
 				DVA_SET_GANG(&dva[d], !!(flags & METASLAB_GANG_HEADER));
 				DVA_SET_ASIZE(&dva[d], asize);
+
+#ifdef ZFS_DEBUG
+				char objname[32];
+				if (ctx->mac_object == DMU_USERUSED_OBJECT)
+					snprintf(objname, sizeof(objname), "USERUSED");
+				else if (ctx->mac_object == DMU_GROUPUSED_OBJECT)
+					snprintf(objname, sizeof(objname), "GROUPUSED");
+				else if (ctx->mac_object == DMU_DEADLIST_OBJECT)
+					snprintf(objname, sizeof(objname), "DEADLIST");
+				else
+					snprintf(objname, sizeof(objname), "%09llu", (u_longlong_t)ctx->mac_object);
+
+				LBA_TRACE("alloc type = %03d; size = %08llu; copies = %d; hint = %p; obj = %02llu:%9s; ms = %03llu; offset = 0x%016llx; (%s, %s)",
+				    ctx->mac_obj_type, (u_longlong_t)psize, ndvas, hintdva, 
+				    (u_longlong_t)ctx->mac_objset, objname,
+				    (u_longlong_t)(offset >> mg->mg_vd->vdev_ms_shift), (u_longlong_t)offset,
+				    (ctx->mac_obj_type < DMU_OT_NUMTYPES) ? dmu_ot[ctx->mac_obj_type].ot_name : "UNKNOWN",
+				    is_metadata ? "META" : "DATA");
+#endif
+
 				goto next_dva;
 			}
 
@@ -308,7 +311,7 @@ fail:
 		bzero(&dva[i], sizeof (dva_t));
 	}
 	spa_config_exit(spa, SCL_ALLOC, FTAG);
-	LBA_TRACE("Alloc Failed: error=%d", error);
+
 	return (error);
 }
 
