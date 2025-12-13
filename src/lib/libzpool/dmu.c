@@ -344,7 +344,7 @@ dmu_prefetch(objset_t *os, uint64_t object, uint64_t offset, uint64_t len)
 
 		rw_enter(&dn->dn_struct_rwlock, RW_READER);
 		blkid = dbuf_whichblock(dn, object * sizeof (dnode_phys_t));
-		dbuf_prefetch(dn, blkid);
+		dbuf_prefetch(dn, 0, blkid);
 		rw_exit(&dn->dn_struct_rwlock);
 		return;
 	}
@@ -370,7 +370,7 @@ dmu_prefetch(objset_t *os, uint64_t object, uint64_t offset, uint64_t len)
 	if (nblks != 0) {
 		blkid = dbuf_whichblock(dn, offset);
 		for (i = 0; i < nblks; i++)
-			dbuf_prefetch(dn, blkid+i);
+			dbuf_prefetch(dn, 0, blkid+i);
 	}
 
 	rw_exit(&dn->dn_struct_rwlock);

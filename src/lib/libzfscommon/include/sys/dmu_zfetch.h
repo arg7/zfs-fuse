@@ -50,6 +50,7 @@ typedef struct zstream {
 	uint64_t	zst_stride;	/* length of stride, in blocks */
 	uint64_t	zst_ph_offset;	/* prefetch offset, in blocks */
 	uint64_t	zst_cap;	/* prefetch limit (cap), in blocks */
+	uint64_t	zst_level;	/* indirect block level */
 	kmutex_t	zst_lock;	/* protects stream */
 	clock_t		zst_last;	/* lbolt of last prefetch */
 	avl_node_t	zst_node;	/* embed avl node here */
@@ -68,7 +69,7 @@ void		zfetch_fini(void);
 
 void		dmu_zfetch_init(zfetch_t *, struct dnode *);
 void		dmu_zfetch_rele(zfetch_t *);
-void		dmu_zfetch(zfetch_t *, uint64_t, uint64_t, int);
+void		dmu_zfetch(zfetch_t *, uint64_t, uint64_t, int, int);
 
 
 #ifdef	__cplusplus

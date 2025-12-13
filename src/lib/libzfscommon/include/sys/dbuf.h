@@ -249,7 +249,7 @@ dmu_buf_impl_t *dbuf_hold_level(struct dnode *dn, int level, uint64_t blkid,
 int dbuf_hold_impl(struct dnode *dn, uint8_t level, uint64_t blkid, int create,
     const void *tag, dmu_buf_impl_t **dbp);
 
-void dbuf_prefetch(struct dnode *dn, uint64_t blkid);
+void dbuf_prefetch(struct dnode *dn, uint64_t level, uint64_t blkid);
 
 void dbuf_add_ref(dmu_buf_impl_t *db, void *tag);
 uint64_t dbuf_refcount(dmu_buf_impl_t *db);

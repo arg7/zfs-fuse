@@ -547,7 +547,7 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 	if ((flags & DB_RF_HAVESTRUCT) == 0)
 		rw_enter(&db->db_dnode->dn_struct_rwlock, RW_READER);
 
-	prefetch = db->db_level == 0 && db->db_blkid != DB_BONUS_BLKID &&
+	prefetch = db->db_blkid != DB_BONUS_BLKID &&
 	    (flags & DB_RF_NOPREFETCH) == 0 && db->db_dnode != NULL &&
 	    DBUF_IS_CACHEABLE(db);
 
@@ -556,7 +556,7 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 		mutex_exit(&db->db_mtx);
 		if (prefetch)
 			dmu_zfetch(&db->db_dnode->dn_zfetch, db->db.db_offset,
-			    db->db.db_size, TRUE);
+			    db->db.db_size, TRUE, db->db_level);
 		if ((flags & DB_RF_HAVESTRUCT) == 0)
 			rw_exit(&db->db_dnode->dn_struct_rwlock);
 	} else if (db->db_state == DB_UNCACHED) {
@@ -570,7 +570,7 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 
 		if (prefetch)
 			dmu_zfetch(&db->db_dnode->dn_zfetch, db->db.db_offset,
-			    db->db.db_size, flags & DB_RF_CACHED);
+			    db->db.db_size, flags & DB_RF_CACHED, db->db_level);
 
 		if ((flags & DB_RF_HAVESTRUCT) == 0)
 			rw_exit(&db->db_dnode->dn_struct_rwlock);
@@ -581,7 +581,7 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 		mutex_exit(&db->db_mtx);
 		if (prefetch)
 			dmu_zfetch(&db->db_dnode->dn_zfetch, db->db.db_offset,
-			    db->db.db_size, TRUE);
+			    db->db.db_size, TRUE, db->db_level);
 		if ((flags & DB_RF_HAVESTRUCT) == 0)
 			rw_exit(&db->db_dnode->dn_struct_rwlock);
 
@@ -1623,7 +1623,7 @@ dbuf_destroy(dmu_buf_impl_t *db)
 }
 
 void
-dbuf_prefetch(dnode_t *dn, uint64_t blkid)
+dbuf_prefetch(dnode_t *dn, uint64_t level, uint64_t blkid)
 {
 	dmu_buf_impl_t *db = NULL;
 	blkptr_t *bp = NULL;
@@ -1631,11 +1631,11 @@ dbuf_prefetch(dnode_t *dn, uint64_t blkid)
 	ASSERT(blkid != DB_BONUS_BLKID);
 	ASSERT(RW_LOCK_HELD(&dn->dn_struct_rwlock));
 
-	if (dnode_block_freed(dn, blkid))
+	if (level == 0 && dnode_block_freed(dn, blkid))
 		return;
 
 	/* dbuf_find() returns with db_mtx held */
-	if (db = dbuf_find(dn, 0, blkid)) {
+	if (db = dbuf_find(dn, level, blkid)) {
 		if (refcount_count(&db->db_holds) > 0) {
 			/*
 			 * This dbuf is active.  We assume that it is
@@ -1649,7 +1649,7 @@ dbuf_prefetch(dnode_t *dn, uint64_t blkid)
 		db = NULL;
 	}
 
-	if (dbuf_findbp(dn, 0, blkid, TRUE, &db, &bp) == 0) {
+	if (dbuf_findbp(dn, level, blkid, TRUE, &db, &bp) == 0) {
 		if (bp && !BP_IS_HOLE(bp)) {
 			arc_buf_t *pbuf;
 			dsl_dataset_t *ds = dn->dn_objset->os_dsl_dataset;
@@ -1657,7 +1657,7 @@ dbuf_prefetch(dnode_t *dn, uint64_t blkid)
 			zbookmark_t zb;
 
 			SET_BOOKMARK(&zb, ds ? ds->ds_object : DMU_META_OBJSET,
-			    dn->dn_object, 0, blkid);
+			    dn->dn_object, level, blkid);
 
 			if (db)
 				pbuf = db->db_buf;

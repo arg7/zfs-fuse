@@ -50,7 +50,7 @@ uint64_t	zfetch_array_rd_sz = 1024 * 1024;
 /* forward decls for static routines */
 static int		dmu_zfetch_colinear(zfetch_t *, zstream_t *);
 static void		dmu_zfetch_dofetch(zfetch_t *, zstream_t *);
-static uint64_t		dmu_zfetch_fetch(dnode_t *, uint64_t, uint64_t);
+static uint64_t		dmu_zfetch_fetch(dnode_t *, uint64_t, uint64_t, uint64_t);
 static uint64_t		dmu_zfetch_fetchsz(dnode_t *, uint64_t, uint64_t);
 static int		dmu_zfetch_find(zfetch_t *, zstream_t *, int);
 static int		dmu_zfetch_stream_insert(zfetch_t *, zstream_t *);
@@ -127,7 +127,9 @@ dmu_zfetch_colinear(zfetch_t *zf, zstream_t *zh)
 			int64_t		diff;
 
 			if (z_walk->zst_len != z_walk->zst_stride ||
-			    z_comp->zst_len != z_comp->zst_stride) {
+			    z_comp->zst_len != z_comp->zst_stride ||
+			    z_walk->zst_level != zh->zst_level ||
+			    z_comp->zst_level != zh->zst_level) {
 				continue;
 			}
 
@@ -218,7 +220,7 @@ dmu_zfetch_dofetch(zfetch_t *zf, zstream_t *zs)
 			break;
 
 		blocks_fetched = dmu_zfetch_fetch(zf->zf_dnode,
-		    prefetch_ofst, zs->zst_len);
+		    prefetch_ofst, zs->zst_len, zs->zst_level);
 
 		prefetch_tail += zs->zst_stride;
 		/* stop if we've run out of stuff to prefetch */
@@ -279,7 +281,7 @@ dmu_zfetch_init(zfetch_t *zf, dnode_t *dno)
  * and fetches it.
  */
 static uint64_t
-dmu_zfetch_fetch(dnode_t *dn, uint64_t blkid, uint64_t nblks)
+dmu_zfetch_fetch(dnode_t *dn, uint64_t blkid, uint64_t nblks, uint64_t level)
 {
 	uint64_t	fetchsz;
 	uint64_t	i;
@@ -287,7 +289,7 @@ dmu_zfetch_fetch(dnode_t *dn, uint64_t blkid, uint64_t nblks)
 	fetchsz = dmu_zfetch_fetchsz(dn, blkid, nblks);
 
 	for (i = 0; i < fetchsz; i++) {
-		dbuf_prefetch(dn, blkid + i);
+		dbuf_prefetch(dn, level, blkid + i);
 	}
 
 	return (fetchsz);
@@ -357,6 +359,9 @@ top:
 			ZFETCHSTAT_BUMP(zfetchstat_bogus_streams);
 			continue;
 		}
+
+		if (zs->zst_level != zh->zst_level)
+			continue;
 
 		/*
 		 * We hit this case when we are in a strided prefetch stream:
@@ -612,6 +617,9 @@ dmu_zfetch_streams_equal(zstream_t *zs1, zstream_t *zs2)
 	if (zs1->zst_offset != zs2->zst_offset)
 		return (0);
 
+	if (zs1->zst_level != zs2->zst_level)
+		return (0);
+
 	if (zs1->zst_len != zs2->zst_len)
 		return (0);
 
@@ -635,7 +643,7 @@ dmu_zfetch_streams_equal(zstream_t *zs1, zstream_t *zs2)
  * routines to create, delete, find, or operate upon prefetch streams.
  */
 void
-dmu_zfetch(zfetch_t *zf, uint64_t offset, uint64_t size, int prefetched)
+dmu_zfetch(zfetch_t *zf, uint64_t offset, uint64_t size, int prefetched, int level)
 {
 	zstream_t	zst;
 	zstream_t	*newstream;
@@ -657,6 +665,7 @@ dmu_zfetch(zfetch_t *zf, uint64_t offset, uint64_t size, int prefetched)
 
 	bzero(&zst, sizeof (zstream_t));
 	zst.zst_offset = offset >> blkshft;
+	zst.zst_level = level;
 	zst.zst_len = (P2ROUNDUP(offset + size, blksz) -
 	    P2ALIGN(offset, blksz)) >> blkshft;
 
@@ -703,6 +712,7 @@ dmu_zfetch(zfetch_t *zf, uint64_t offset, uint64_t size, int prefetched)
 		}
 
 		newstream->zst_offset = zst.zst_offset;
+		newstream->zst_level = zst.zst_level;
 		newstream->zst_len = zst.zst_len;
 		newstream->zst_stride = zst.zst_len;
 		newstream->zst_ph_offset = zst.zst_len + zst.zst_offset;
