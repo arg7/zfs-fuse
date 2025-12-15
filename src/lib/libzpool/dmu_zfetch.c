@@ -49,7 +49,7 @@ uint64_t	zfetch_array_rd_sz = 1024 * 1024;
 
 /* forward decls for static routines */
 static int		dmu_zfetch_colinear(zfetch_t *, zstream_t *);
-static void		dmu_zfetch_dofetch(zfetch_t *, zstream_t *);
+static void		dmu_zfetch_dofetch(zfetch_t *, zstream_t *, boolean_t);
 static uint64_t		dmu_zfetch_fetch(dnode_t *, uint64_t, uint64_t, uint64_t);
 static uint64_t		dmu_zfetch_fetchsz(dnode_t *, uint64_t, uint64_t);
 static int		dmu_zfetch_find(zfetch_t *, zstream_t *, int);
@@ -145,7 +145,7 @@ dmu_zfetch_colinear(zfetch_t *zf, zstream_t *zh)
 				mutex_destroy(&z_comp->zst_lock);
 				kmem_free(z_comp, sizeof (zstream_t));
 
-				dmu_zfetch_dofetch(zf, z_walk);
+				dmu_zfetch_dofetch(zf, z_walk, B_TRUE);
 
 				rw_exit(&zf->zf_rwlock);
 				return (1);
@@ -163,7 +163,7 @@ dmu_zfetch_colinear(zfetch_t *zf, zstream_t *zh)
 				mutex_destroy(&z_comp->zst_lock);
 				kmem_free(z_comp, sizeof (zstream_t));
 
-				dmu_zfetch_dofetch(zf, z_walk);
+				dmu_zfetch_dofetch(zf, z_walk, B_TRUE);
 
 				rw_exit(&zf->zf_rwlock);
 				return (1);
@@ -180,13 +180,18 @@ dmu_zfetch_colinear(zfetch_t *zf, zstream_t *zh)
  * routine that actually prefetches the individual blocks.
  */
 static void
-dmu_zfetch_dofetch(zfetch_t *zf, zstream_t *zs)
+dmu_zfetch_dofetch(zfetch_t *zf, zstream_t *zs, boolean_t writer)
 {
 	uint64_t	prefetch_tail;
 	uint64_t	prefetch_limit;
 	uint64_t	prefetch_ofst;
 	uint64_t	prefetch_len;
 	uint64_t	blocks_fetched;
+	dnode_t		*dn = zf->zf_dnode;
+	int		direction = zs->zst_direction;
+	uint64_t	offset = zs->zst_offset;
+	uint64_t	len = zs->zst_len;
+	int 		level = zs->zst_level;
 
 	zs->zst_stride = MAX((int64_t)zs->zst_stride, zs->zst_len);
 	zs->zst_cap = MIN(zfetch_block_cap, 2 * zs->zst_cap);
@@ -199,36 +204,48 @@ dmu_zfetch_dofetch(zfetch_t *zf, zstream_t *zs)
 	prefetch_limit = zs->zst_offset + zs->zst_len +
 	    (zs->zst_cap * zs->zst_stride) / zs->zst_len;
 
-	while (prefetch_tail < prefetch_limit) {
-		prefetch_ofst = zs->zst_offset + zs->zst_direction *
-		    (prefetch_tail - zs->zst_offset);
+	/* Speculatively update state before unlocking to avoid UAF after re-lock */
+	zs->zst_ph_offset = prefetch_limit;
+	zs->zst_last = lbolt;
 
-		prefetch_len = zs->zst_len;
+	if (!writer)
+		mutex_exit(&zs->zst_lock);
+	rw_exit(&zf->zf_rwlock);
+
+	/* Perform IO without locks to avoid deadlock/recursion */
+	while (prefetch_tail < prefetch_limit) {
+		prefetch_ofst = offset + direction *
+		    (prefetch_tail - offset);
+
+		prefetch_len = len;
 
 		/*
 		 * Don't prefetch beyond the end of the file, if working
 		 * backwards.
 		 */
-		if ((zs->zst_direction == ZFETCH_BACKWARD) &&
+		if ((direction == ZFETCH_BACKWARD) &&
 		    (prefetch_ofst > prefetch_tail)) {
 			prefetch_len += prefetch_ofst;
 			prefetch_ofst = 0;
 		}
 
 		/* don't prefetch more than we're supposed to */
-		if (prefetch_len > zs->zst_len)
+		if (prefetch_len > len)
 			break;
 
-		blocks_fetched = dmu_zfetch_fetch(zf->zf_dnode,
-		    prefetch_ofst, zs->zst_len, zs->zst_level);
+		blocks_fetched = dmu_zfetch_fetch(dn,
+		    prefetch_ofst, len, level);
 
 		prefetch_tail += zs->zst_stride;
 		/* stop if we've run out of stuff to prefetch */
-		if (blocks_fetched < zs->zst_len)
+		if (blocks_fetched < len)
 			break;
 	}
-	zs->zst_ph_offset = prefetch_tail;
-	zs->zst_last = lbolt;
+
+	if (writer)
+		rw_enter(&zf->zf_rwlock, RW_WRITER);
+	else
+		rw_enter(&zf->zf_rwlock, RW_READER);
 }
 
 void
@@ -360,7 +377,7 @@ top:
 			continue;
 		}
 
-		if (zs->zst_level != zh->zst_level)
+	if (zs->zst_level != zh->zst_level)
 			continue;
 
 		/*
@@ -502,8 +519,7 @@ top:
 		} else {
 			ZFETCHSTAT_BUMP(zfetchstat_stream_noresets);
 			rc = 1;
-			dmu_zfetch_dofetch(zf, zs);
-			mutex_exit(&zs->zst_lock);
+			dmu_zfetch_dofetch(zf, zs, B_FALSE);
 		}
 	}
 out:

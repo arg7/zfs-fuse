@@ -1464,7 +1464,7 @@ dbuf_findbp(dnode_t *dn, int level, uint64_t blkid, int fail_sparse,
 		if (err)
 			return (err);
 		err = dbuf_read(*parentp, NULL,
-		    (DB_RF_HAVESTRUCT | DB_RF_NOPREFETCH | DB_RF_CANFAIL));
+		    (DB_RF_HAVESTRUCT | DB_RF_CANFAIL));
 		if (err) {
 			dbuf_rele(*parentp, NULL);
 			*parentp = NULL;
