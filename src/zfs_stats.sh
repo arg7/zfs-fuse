@@ -48,4 +48,32 @@ echo "  Hits:   $AHITS"
 echo "  Misses: $AMISS"
 echo "  Total:  $ATOTAL"
 echo "  Eff:    $APERC%"
+
+# --- ARC Prefetch Breakdown ---
+PMHITS=$(get_val "arcstats/prefetch_metadata_hits")
+PMMISS=$(get_val "arcstats/prefetch_metadata_misses")
+PMTOTAL=$((PMHITS + PMMISS))
+if [ $PMTOTAL -gt 0 ]; then
+    PMPERC=$(awk "BEGIN {printf \"%.2f\", 100 * $PMHITS / $PMTOTAL}")
+else
+    PMPERC="0.00"
+fi
+
+PDHITS=$(get_val "arcstats/prefetch_data_hits")
+PDMISS=$(get_val "arcstats/prefetch_data_misses")
+PDTOTAL=$((PDHITS + PDMISS))
+if [ $PDTOTAL -gt 0 ]; then
+    PDPERC=$(awk "BEGIN {printf \"%.2f\", 100 * $PDHITS / $PDTOTAL}")
+else
+    PDPERC="0.00"
+fi
+
+echo ""
+echo "[ARC Prefetch Breakdown]"
+echo "  Metadata Hits:   $PMHITS"
+echo "  Metadata Misses: $PMMISS"
+echo "  Metadata Eff:    $PMPERC%"
+echo "  Data Hits:       $PDHITS"
+echo "  Data Misses:     $PDMISS"
+echo "  Data Eff:        $PDPERC%"
 echo ""

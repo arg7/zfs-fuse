@@ -43,7 +43,7 @@ uint32_t	zfetch_max_streams = 8;
 /* min time before stream reclaim */
 uint32_t	zfetch_min_sec_reap = 2;
 /* max number of blocks to fetch at a time */
-uint32_t	zfetch_block_cap = 256;
+uint32_t	zfetch_block_cap = 2048;
 /* number of bytes in a array_read at which we stop prefetching (1Mb) */
 uint64_t	zfetch_array_rd_sz = 1024 * 1024;
 
@@ -195,6 +195,15 @@ dmu_zfetch_dofetch(zfetch_t *zf, zstream_t *zs, boolean_t writer)
 
 	zs->zst_stride = MAX((int64_t)zs->zst_stride, zs->zst_len);
 	zs->zst_cap = MIN(zfetch_block_cap, 2 * zs->zst_cap);
+
+	/*
+	 * Cap by byte size if we are exceeding the array read size.
+	 */
+	if (dn->dn_datablkshift) {
+		uint64_t blksz = 1 << dn->dn_datablkshift;
+		if (zs->zst_cap * blksz > zfetch_array_rd_sz)
+			zs->zst_cap = MAX(1, zfetch_array_rd_sz / blksz);
+	}
 
 	prefetch_tail = MAX((int64_t)zs->zst_ph_offset,
 	    (int64_t)(zs->zst_offset + zs->zst_stride));

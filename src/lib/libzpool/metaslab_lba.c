@@ -112,17 +112,17 @@ metaslab_lba_group_alloc(metaslab_group_t *mg, uint64_t psize, uint64_t txg,
 
 	/*
 	 * Direction depends on content type:
-	 * Data: Start -> End (0 to count-1)
-	 * Metadata: End -> Start (count-1 to 0)
+	 * Metadata: Start -> End (0 to count-1)
+	 * Data: End -> Start (count-1 to 0)
 	 */
-	if (is_metadata) {
-		start = vd->vdev_ms_count - 1;
-		end = -1;
-		step = -1;
-	} else {
+	if (!is_metadata) {
 		start = 0;
 		end = vd->vdev_ms_count;
 		step = 1;
+	} else {
+		start = vd->vdev_ms_count - 1;
+		end = -1;
+		step = -1;
 	}
 
 
