@@ -36,9 +36,7 @@
  * until we can get this working the way we want it to.
  */
 
-#else
 #define	ZFETCH_TRACE(...)
-#endif
 
 int zfs_prefetch_disable = 0;
 
