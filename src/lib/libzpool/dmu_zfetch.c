@@ -36,6 +36,10 @@
  * until we can get this working the way we want it to.
  */
 
+#else
+#define	ZFETCH_TRACE(...)
+#endif
+
 int zfs_prefetch_disable = 0;
 
 /* max # of streams per zfetch */
@@ -399,7 +403,7 @@ top:
 				/* already fetched */
 				ZFETCHSTAT_BUMP(zfetchstat_stride_hits);
 				rc = 1;
-				goto out;
+				// Do not goto out; fall through to allow escalation!
 			} else {
 				ZFETCHSTAT_BUMP(zfetchstat_stride_misses);
 			}
