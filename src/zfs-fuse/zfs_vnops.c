@@ -2062,14 +2062,20 @@ zfs_readdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp,
 			(void) strcpy(zap.za_name, ".");
 			zap.za_normalization_conflict = 0;
 			objnum = zp->z_id;
+			/* zap.za_first_integer = ZFS_DIRENT_TYPE(DT_DIR) << 60; Fake it for type logic below */
+			odp->d_type = DT_DIR;
 		} else if (offset == 1) {
 			(void) strcpy(zap.za_name, "..");
 			zap.za_normalization_conflict = 0;
 			objnum = zp->z_phys->zp_parent;
+			/* zap.za_first_integer = ZFS_DIRENT_TYPE(DT_DIR) << 60; Fake it */
+			odp->d_type = DT_DIR;
 		} else if (offset == 2 && zfs_show_ctldir(zp)) {
 			(void) strcpy(zap.za_name, ZFS_CTLDIR_NAME);
 			zap.za_normalization_conflict = 0;
 			objnum = ZFSCTL_INO_ROOT;
+			/* zap.za_first_integer = ZFS_DIRENT_TYPE(DT_DIR) << 60; Fake it */
+			odp->d_type = DT_DIR;
 		} else {
 			/*
 			 * Grab next entry.
@@ -2096,7 +2102,7 @@ zfs_readdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp,
 			 * MacOS X can extract the object type here such as:
 			 * uint8_t type = ZFS_DIRENT_TYPE(zap.za_first_integer);
 			 */
- 			/* ZFSFUSE: don't care */
+			/* ZFSFUSE: don't care no more! */
 #if 0
 			if (check_sysattrs && !zap.za_normalization_conflict) {
 				zap.za_normalization_conflict =
@@ -2157,6 +2163,7 @@ zfs_readdir(vnode_t *vp, uio_t *uio, cred_t *cr, int *eofp,
 			 */
 			odp->d_ino = objnum;
 			odp->d_reclen = reclen;
+			odp->d_type = ZFS_DIRENT_TYPE(zap.za_first_integer);
 			/* NOTE: d_off is the offset for the *next* entry */
 			next = &(odp->d_off);
 			(void) strncpy(odp->d_name, zap.za_name,

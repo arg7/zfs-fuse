@@ -42,6 +42,18 @@ extern "C" {
 /*
  * File-system independent directory entry.
  */
+#ifndef DT_UNKNOWN
+#define	DT_UNKNOWN	 0
+#define	DT_FIFO		 1
+#define	DT_CHR		 2
+#define	DT_DIR		 4
+#define	DT_BLK		 6
+#define	DT_REG		 8
+#define	DT_LNK		10
+#define	DT_SOCK		12
+#define	DT_WHT		14
+#endif
+
 typedef struct dirent {
 	ino_t		d_ino;		/* "inode number" of entry */
 	off_t		d_off;		/* offset of disk directory entry */
@@ -71,6 +83,7 @@ typedef struct dirent64 {
 	ino64_t		d_ino;		/* "inode number" of entry */
 	off64_t		d_off;		/* offset of disk directory entry */
 	unsigned short	d_reclen;	/* length of this record */
+	unsigned char	d_type;		/* file type */
 	char		d_name[1];	/* name of file */
 } dirent64_t;
 

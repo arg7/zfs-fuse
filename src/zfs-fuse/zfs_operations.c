@@ -730,8 +730,19 @@ static int zfsfuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t of
 		if(iovec.iov_base == entry.buf)
 			break;
 
+
 		fstat.st_ino = entry.dirent.d_ino;
-		fstat.st_mode = 0;
+		
+		switch (entry.dirent.d_type) {
+			case DT_FIFO: fstat.st_mode = S_IFIFO; break;
+			case DT_CHR:  fstat.st_mode = S_IFCHR; break;
+			case DT_DIR:  fstat.st_mode = S_IFDIR; break;
+			case DT_BLK:  fstat.st_mode = S_IFBLK; break;
+			case DT_REG:  fstat.st_mode = S_IFREG; break;
+			case DT_LNK:  fstat.st_mode = S_IFLNK; break;
+			case DT_SOCK: fstat.st_mode = S_IFSOCK; break;
+			default:      fstat.st_mode = 0; break;
+		}
 
 		int dsize = fuse_add_direntry(req, NULL, 0, entry.dirent.d_name, NULL, 0);
 		if(dsize > outbuf_resid)
